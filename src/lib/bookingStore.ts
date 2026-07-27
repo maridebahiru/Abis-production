@@ -125,6 +125,40 @@ export function mapSupabasePackageToPackage(row: any): Package {
   };
 }
 
+export function mapSupabasePortfolioItemToPortfolioItem(row: any): PortfolioItem {
+  if (!row) return row;
+  return {
+    id: row.id ? String(row.id) : `port-${Date.now()}`,
+    title: row.title || '',
+    category: row.category || 'Wedding',
+    image: row.image || '',
+    clientName: row.client_name || row.clientName || '',
+    date: row.date || '',
+    description: row.description || '',
+    btsVideoUrl: row.bts_video_url || row.btsVideoUrl || '',
+    testimonial: row.testimonial || undefined,
+    isFeatured: Boolean(row.is_featured ?? row.isFeatured ?? false),
+    isVideo: Boolean(row.is_video ?? row.isVideo ?? false),
+    displayOrder: Number(row.display_order ?? row.displayOrder ?? 0),
+  };
+}
+
+export function mapPortfolioItemToSupabaseRow(item: PortfolioItem): any {
+  return {
+    id: item.id,
+    title: item.title,
+    category: item.category,
+    image: item.image,
+    client_name: item.clientName || '',
+    date: item.date || '',
+    description: item.description || '',
+    bts_video_url: item.btsVideoUrl || '',
+    testimonial: item.testimonial || null,
+    is_featured: Boolean(item.isFeatured),
+    display_order: Number(item.displayOrder || 0),
+  };
+}
+
 export function mapSupabaseBookingToBooking(row: any): Booking {
   if (!row) return row;
   return {
@@ -388,13 +422,14 @@ export const bookingStore = {
         if (error) {
           supabaseRestDisabled = true;
         } else if (data && data.length > 0) {
-          return data as PortfolioItem[];
+          return data.map(mapSupabasePortfolioItemToPortfolioItem);
         }
       } catch (e) {
         supabaseRestDisabled = true;
       }
     }
-    return getStoredData<PortfolioItem[]>(STORAGE_KEYS.PORTFOLIO, PORTFOLIO_ITEMS);
+    const stored = await getStoredData<PortfolioItem[]>(STORAGE_KEYS.PORTFOLIO, PORTFOLIO_ITEMS);
+    return stored.map(mapSupabasePortfolioItemToPortfolioItem);
   },
 
   async savePortfolioItem(item: PortfolioItem): Promise<PortfolioItem> {
@@ -414,9 +449,13 @@ export const bookingStore = {
 
     if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
       try {
-        await supabase.from('portfolio_items').upsert([item]);
+        const dbRow = mapPortfolioItemToSupabaseRow(item);
+        const { error } = await supabase.from('portfolio_items').upsert([dbRow]);
+        if (error) {
+          console.warn('Supabase portfolio item save error:', error.message);
+        }
       } catch (e) {
-        // Silently handled
+        console.warn('Supabase portfolio item save exception:', e);
       }
     }
     return item;
@@ -439,7 +478,8 @@ export const bookingStore = {
 
     if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
       try {
-        await supabase.from('portfolio_items').upsert(processed);
+        const dbRows = processed.map(mapPortfolioItemToSupabaseRow);
+        await supabase.from('portfolio_items').upsert(dbRows);
       } catch (e) {
         // Silently handled
       }
