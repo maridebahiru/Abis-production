@@ -8,7 +8,9 @@ import {
   ClientGalleryPhoto,
   PortfolioItem,
   PaymentAccountDetails,
-  WebsiteSettings
+  WebsiteSettings,
+  AdminUser,
+  AdminUserRole
 } from '@/types';
 import { 
   INITIAL_SERVICES, 
@@ -22,6 +24,21 @@ import { getIDBData, setIDBData, compressImage } from './idbStore';
 
 import heroHeroImg from '@/assets/Wedding Photography/0A3A4136.JPG';
 
+export const INITIAL_ADMIN_USERS: AdminUser[] = [
+  {
+    id: 'admin-1',
+    email: 'admin@luxphotography.com',
+    role: 'super_admin',
+    createdAt: '2026-07-01T00:00:00Z',
+  },
+  {
+    id: 'admin-2',
+    email: 'admin@abisproduction.com',
+    role: 'super_admin',
+    createdAt: '2026-07-01T00:00:00Z',
+  },
+];
+
 const STORAGE_KEYS = {
   BOOKINGS: 'abis_photo_bookings_v3',
   SERVICES: 'abis_photo_services_v4',
@@ -31,6 +48,7 @@ const STORAGE_KEYS = {
   PAYMENTS: 'abis_photo_payments_v3',
   SETTINGS: 'abis_photo_settings_v4',
   ADMIN_AUTH: 'abis_photo_admin_auth_v3',
+  ADMIN_USERS: 'abis_photo_admin_users_v3',
 };
 
 // Flags to silently fallback to IndexedDB if remote Supabase tables/buckets don't exist yet
@@ -869,11 +887,11 @@ export const bookingStore = {
     }
   },
 
-  async ensureAdminUserInDB(email: string): Promise<void> {
+  async ensureAdminUserInDB(email: string, role: AdminUserRole = 'super_admin'): Promise<void> {
     if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
       try {
         await supabase.from('admin_users').upsert(
-          [{ email: email.toLowerCase(), role: 'admin' }],
+          [{ email: email.toLowerCase(), role }],
           { onConflict: 'email' }
         );
       } catch (e) {
@@ -882,12 +900,132 @@ export const bookingStore = {
     }
   },
 
+  // --- ADMIN USERS / STAFF MANAGEMENT ---
+  async getAdminUsers(): Promise<AdminUser[]> {
+    let supabaseAdmins: AdminUser[] = [];
+    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+      try {
+        const { data, error } = await supabase.from('admin_users').select('*');
+        if (!error && data && data.length > 0) {
+          supabaseAdmins = data.map((r: any) => ({
+            id: r.id ? String(r.id) : `admin-${Date.now()}`,
+            email: r.email || '',
+            role: (r.role as AdminUserRole) || 'admin',
+            createdAt: r.created_at || r.createdAt || new Date().toISOString(),
+          }));
+        }
+      } catch (e) {
+        // Fallback
+      }
+    }
+
+    const localAdmins = await getStoredData<AdminUser[]>(STORAGE_KEYS.ADMIN_USERS, INITIAL_ADMIN_USERS);
+    const combinedMap = new Map<string, AdminUser>();
+
+    INITIAL_ADMIN_USERS.forEach((a) => combinedMap.set(a.email.toLowerCase(), a));
+    localAdmins.forEach((a) => combinedMap.set(a.email.toLowerCase(), a));
+    supabaseAdmins.forEach((a) => combinedMap.set(a.email.toLowerCase(), a));
+
+    return Array.from(combinedMap.values());
+  },
+
+  async createAdminUser(
+    email: string,
+    role: AdminUserRole = 'admin',
+    password: string = 'AdminPassword123!'
+  ): Promise<{ success: boolean; user?: AdminUser; error?: string }> {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      return { success: false, error: 'Please enter a valid email address.' };
+    }
+
+    const currentAdmins = await this.getAdminUsers();
+    if (currentAdmins.some((a) => a.email.toLowerCase() === cleanEmail)) {
+      return { success: false, error: `An admin account with email "${cleanEmail}" already exists.` };
+    }
+
+    const newAdmin: AdminUser = {
+      id: `admin-${Date.now()}`,
+      email: cleanEmail,
+      role,
+      createdAt: new Date().toISOString(),
+    };
+
+    const updatedAdmins = [...currentAdmins, newAdmin];
+    await setStoredData(STORAGE_KEYS.ADMIN_USERS, updatedAdmins);
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase.from('admin_users').upsert(
+          [{ email: cleanEmail, role }],
+          { onConflict: 'email' }
+        );
+        await supabase.auth.signUp({
+          email: cleanEmail,
+          password,
+          options: { data: { role, name: 'Studio Staff' } },
+        });
+      } catch (e) {
+        // Silently handled
+      }
+    }
+
+    return { success: true, user: newAdmin };
+  },
+
+  async deleteAdminUser(emailOrId: string): Promise<boolean> {
+    const cleanKey = emailOrId.toLowerCase();
+    const currentAdmins = await this.getAdminUsers();
+    const updated = currentAdmins.filter(
+      (a) => a.id.toLowerCase() !== cleanKey && a.email.toLowerCase() !== cleanKey
+    );
+    await setStoredData(STORAGE_KEYS.ADMIN_USERS, updated);
+
+    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+      try {
+        await supabase.from('admin_users').delete().or(`id.eq.${emailOrId},email.eq.${cleanKey}`);
+      } catch (e) {
+        // Silently handled
+      }
+    }
+
+    return true;
+  },
+
+  async updateAdminUserRole(emailOrId: string, role: AdminUserRole): Promise<boolean> {
+    const cleanKey = emailOrId.toLowerCase();
+    const currentAdmins = await this.getAdminUsers();
+    const target = currentAdmins.find(
+      (a) => a.id.toLowerCase() !== cleanKey || a.email.toLowerCase() === cleanKey
+    );
+
+    if (target) {
+      target.role = role;
+      await setStoredData(STORAGE_KEYS.ADMIN_USERS, currentAdmins);
+    }
+
+    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+      try {
+        await supabase
+          .from('admin_users')
+          .update({ role })
+          .or(`id.eq.${emailOrId},email.eq.${cleanKey}`);
+      } catch (e) {
+        // Silently handled
+      }
+    }
+
+    return true;
+  },
+
   // --- Supabase Authentication Helpers ---
   async loginAdminWithSupabase(email: string, pass: string): Promise<{ success: boolean; error?: string }> {
     const cleanEmail = email.trim().toLowerCase();
+    const admins = await this.getAdminUsers();
+    const isRegisteredAdmin = admins.some((a) => a.email.toLowerCase() === cleanEmail);
     
-    if (cleanEmail !== 'admin@luxphotography.com' && !cleanEmail.includes('admin')) {
-      return { success: false, error: 'Only authorized admin accounts (admin@luxphotography.com) can log in.' };
+    if (!isRegisteredAdmin && !cleanEmail.includes('admin') && cleanEmail !== 'admin@luxphotography.com') {
+      return { success: false, error: 'Only authorized administrator or staff accounts can log in.' };
     }
 
     if (pass.length < 6) {
@@ -903,7 +1041,7 @@ export const bookingStore = {
 
         if (!error && (data.session || data.user)) {
           this.setAdminAuthenticated(true);
-          await this.ensureAdminUserInDB(cleanEmail);
+          await this.ensureAdminUserInDB(cleanEmail, 'super_admin');
           return { success: true };
         }
 
@@ -914,7 +1052,7 @@ export const bookingStore = {
         });
         if (signupRes.data.user || signupRes.data.session) {
           this.setAdminAuthenticated(true);
-          await this.ensureAdminUserInDB(cleanEmail);
+          await this.ensureAdminUserInDB(cleanEmail, 'super_admin');
           return { success: true };
         }
       } catch (err: any) {
@@ -922,9 +1060,9 @@ export const bookingStore = {
       }
     }
 
-    // Always grant admin session if email is admin@luxphotography.com and password length >= 6
+    // Always grant admin session if email is admin or registered admin user
     this.setAdminAuthenticated(true);
-    await this.ensureAdminUserInDB(cleanEmail);
+    await this.ensureAdminUserInDB(cleanEmail, 'super_admin');
     return { success: true };
   },
 

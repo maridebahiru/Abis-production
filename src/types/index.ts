@@ -148,3 +148,12 @@ export interface WebsiteSettings {
   facebookUrl: string;
   whatsappUrl: string;
 }
+
+export type AdminUserRole = 'super_admin' | 'admin' | 'editor';
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  role: AdminUserRole;
+  createdAt?: string;
+}

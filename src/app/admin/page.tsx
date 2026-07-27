@@ -53,7 +53,9 @@ import {
   PortfolioItem,
   PaymentAccountDetails,
   WebsiteSettings,
-  ServiceCategory
+  ServiceCategory,
+  AdminUser,
+  AdminUserRole
 } from '@/types';
 import { bookingStore, INITIAL_WEBSITE_SETTINGS } from '@/lib/bookingStore';
 
@@ -64,6 +66,7 @@ type AdminTab =
   | 'services'
   | 'packages'
   | 'customers'
+  | 'admin_users'
   | 'payments'
   | 'calendar'
   | 'settings'
@@ -84,6 +87,15 @@ export default function AdminDashboardPage() {
   const [portfolioItems, setPortfolioItems] = useState<PortfolioItem[]>([]);
   const [paymentSettings, setPaymentSettings] = useState<PaymentAccountDetails[]>([]);
   const [siteSettings, setSiteSettings] = useState<WebsiteSettings>(INITIAL_WEBSITE_SETTINGS);
+
+  // Admin Users / Staff Access State
+  const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
+  const [adminUserModalOpen, setAdminUserModalOpen] = useState<boolean>(false);
+  const [newAdminEmail, setNewAdminEmail] = useState<string>('');
+  const [newAdminRole, setNewAdminRole] = useState<AdminUserRole>('admin');
+  const [newAdminPassword, setNewAdminPassword] = useState<string>('AdminPassword123!');
+  const [adminUserError, setAdminUserError] = useState<string>('');
+  const [adminUserSuccess, setAdminUserSuccess] = useState<string>('');
 
   // Search & Filters
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -114,6 +126,10 @@ export default function AdminDashboardPage() {
 
   const [batchImageFiles, setBatchImageFiles] = useState<File[]>([]);
   const [uploadProgressText, setUploadProgressText] = useState<string>('');
+
+  // Date Block State
+  const [newBlockDate, setNewBlockDate] = useState<string>('');
+  const [blockReason, setBlockReason] = useState<string>('Studio Maintenance');
 
   const handleBtsVideoFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -547,6 +563,7 @@ export default function AdminDashboardPage() {
             { id: 'services', label: 'Services', icon: Sparkles },
             { id: 'packages', label: 'Packages', icon: PackageIcon },
             { id: 'customers', label: 'Customers', icon: Users },
+            { id: 'admin_users', label: 'Admin & Staff Users', icon: ShieldCheck },
             { id: 'payments', label: 'Payments', icon: CreditCard },
             { id: 'calendar', label: 'Calendar', icon: CalendarIcon },
             { id: 'settings', label: 'Website Settings', icon: Globe },
@@ -1285,6 +1302,188 @@ export default function AdminDashboardPage() {
               </div>
             </div>
           </form>
+        )}
+
+        {/* TAB 9: ADMIN & STAFF USER MANAGEMENT (SUPER ADMIN) */}
+        {activeTab === 'admin_users' && (
+          <div className="space-y-6 animate-in fade-in duration-300">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 glass-card p-6 sm:p-8 rounded-3xl border border-gold-500/20 shadow-xl">
+              <div>
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gold-500/10 border border-gold-500/30 text-gold-400 text-[10px] font-bold uppercase tracking-widest mb-2">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Super Admin Controls</span>
+                </div>
+                <h2 className="font-serif text-2xl font-bold text-zinc-100">
+                  Administrator & Staff Management ({adminUsers.length})
+                </h2>
+                <p className="text-xs text-zinc-400 mt-1">
+                  As a Super Admin, you can invite and manage as many admin users, managers, and studio staff accounts as needed.
+                </p>
+              </div>
+
+              <button
+                onClick={() => {
+                  setAdminUserError('');
+                  setAdminUserSuccess('');
+                  setAdminUserModalOpen(true);
+                }}
+                className="gold-btn px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center gap-2 shadow-gold-glow shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Admin / Staff User</span>
+              </button>
+            </div>
+
+            {/* Admin Users Table */}
+            <div className="glass-card rounded-3xl border border-zinc-800 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-zinc-900/80 text-zinc-400 font-semibold uppercase tracking-wider border-b border-zinc-800">
+                    <tr>
+                      <th className="p-4">User Account</th>
+                      <th className="p-4">Role & Access Level</th>
+                      <th className="p-4">Joined Date</th>
+                      <th className="p-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800/60 text-zinc-300">
+                    {adminUsers.map((user) => (
+                      <tr key={user.id} className="hover:bg-zinc-900/50 transition-colors">
+                        <td className="p-4 font-semibold text-zinc-100 flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-gold-500/10 border border-gold-500/30 flex items-center justify-center text-gold-400">
+                            <ShieldCheck className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <div className="font-bold text-zinc-100">{user.email}</div>
+                            <div className="text-[10px] text-zinc-500 font-mono">ID: {user.id}</div>
+                          </div>
+                        </td>
+
+                        <td className="p-4">
+                          <select
+                            value={user.role}
+                            onChange={(e) => handleChangeAdminRole(user.id, e.target.value as AdminUserRole)}
+                            className={`px-3 py-1.5 rounded-xl border text-xs font-bold uppercase ${
+                              user.role === 'super_admin'
+                                ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                                : user.role === 'admin'
+                                ? 'bg-gold-500/10 border-gold-500/30 text-gold-400'
+                                : 'bg-zinc-800 border-zinc-700 text-zinc-300'
+                            }`}
+                          >
+                            <option value="super_admin" className="bg-zinc-900 text-zinc-100">Super Admin (Full Access)</option>
+                            <option value="admin" className="bg-zinc-900 text-zinc-100">Admin (Standard)</option>
+                            <option value="editor" className="bg-zinc-900 text-zinc-100">Editor (Content Only)</option>
+                          </select>
+                        </td>
+
+                        <td className="p-4 text-zinc-400 font-mono">
+                          {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'Active'}
+                        </td>
+
+                        <td className="p-4 text-right">
+                          <button
+                            onClick={() => handleDeleteAdminUser(user.id, user.email)}
+                            className="px-3 py-1.5 rounded-lg bg-red-950/60 border border-red-500/30 text-red-400 hover:bg-red-900 text-xs font-bold inline-flex items-center gap-1 transition-all"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Revoke Access</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Add New Admin Modal */}
+            {adminUserModalOpen && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-dark-bg/95 backdrop-blur-xl animate-in fade-in duration-200">
+                <div className="relative w-full max-w-lg bg-zinc-950 border border-gold-500/30 rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl">
+                  <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
+                    <div>
+                      <span className="text-xs font-bold uppercase tracking-widest text-gold-400">Super Admin Action</span>
+                      <h3 className="font-serif text-xl font-bold text-zinc-100">Register New Admin / Staff User</h3>
+                    </div>
+                    <button
+                      onClick={() => setAdminUserModalOpen(false)}
+                      className="p-1 rounded-lg bg-zinc-900 text-zinc-400 hover:text-zinc-100"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  {adminUserError && (
+                    <div className="p-3 rounded-xl bg-red-950/80 border border-red-500/40 text-xs text-red-300 text-center font-medium">
+                      {adminUserError}
+                    </div>
+                  )}
+
+                  {adminUserSuccess && (
+                    <div className="p-3 rounded-xl bg-emerald-950/80 border border-emerald-500/40 text-xs text-emerald-300 text-center font-medium">
+                      {adminUserSuccess}
+                    </div>
+                  )}
+
+                  <form onSubmit={handleAddAdminUser} className="space-y-4 text-xs">
+                    <div className="space-y-1.5">
+                      <label className="font-semibold text-zinc-300">Staff Email Address *</label>
+                      <input
+                        type="email"
+                        required
+                        value={newAdminEmail}
+                        onChange={(e) => setNewAdminEmail(e.target.value)}
+                        placeholder="manager@abisproduction.com"
+                        className="w-full px-4 py-3 rounded-xl bg-zinc-900 border border-zinc-700 text-zinc-100 focus:border-gold-400 focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="font-semibold text-zinc-300">Default Login Password *</label>
+                      <input
+                        type="password"
+                        required
+                        value={newAdminPassword}
+                        onChange={(e) => setNewAdminPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="w-full px-4 py-3 rounded-xl bg-zinc-900 border border-zinc-700 text-zinc-100 focus:border-gold-400 focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="font-semibold text-zinc-300">Role & Access Level *</label>
+                      <select
+                        value={newAdminRole}
+                        onChange={(e) => setNewAdminRole(e.target.value as AdminUserRole)}
+                        className="w-full px-4 py-3 rounded-xl bg-zinc-900 border border-zinc-700 text-zinc-100 focus:border-gold-400 focus:outline-none"
+                      >
+                        <option value="super_admin">Super Admin (Full Administrative Rights)</option>
+                        <option value="admin">Admin (Manage Bookings, Portfolio, Services)</option>
+                        <option value="editor">Editor (Portfolio & Content Updates Only)</option>
+                      </select>
+                    </div>
+
+                    <div className="pt-4 flex justify-end gap-3 border-t border-zinc-800">
+                      <button
+                        type="button"
+                        onClick={() => setAdminUserModalOpen(false)}
+                        className="px-4 py-2.5 rounded-xl bg-zinc-900 text-zinc-400 hover:text-zinc-100 font-bold"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="gold-btn px-6 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider"
+                      >
+                        Register Staff Account
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+          </div>
         )}
 
         {/* TAB 10: ACCOUNT */}
