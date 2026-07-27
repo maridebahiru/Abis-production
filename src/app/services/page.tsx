@@ -30,8 +30,23 @@ export default function ServicesPage() {
     loadData();
   }, []);
 
-  const getServicePackages = (serviceId: string) => {
-    return packages.filter((p) => p.serviceId === serviceId);
+  const getServicePackages = (serv: Service | string) => {
+    const sId = typeof serv === 'string' ? serv : serv.id;
+    const sTitle = typeof serv === 'string' ? '' : serv.title || '';
+    const sCategory = typeof serv === 'string' ? '' : serv.category || '';
+
+    const sIdClean = sId.toLowerCase();
+    const sTitleClean = sTitle.toLowerCase();
+    const sCatClean = sCategory.toLowerCase();
+
+    return packages.filter((p) => {
+      const pSid = (p.serviceId || (p as any).service_id || '').toLowerCase();
+      return (
+        pSid === sIdClean ||
+        (sTitleClean && pSid === sTitleClean) ||
+        (sCatClean && pSid === sCatClean)
+      );
+    });
   };
 
   return (
@@ -53,7 +68,7 @@ export default function ServicesPage() {
       {/* Services Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
         {services.map((service) => {
-          const servicePkgs = getServicePackages(service.id);
+          const servicePkgs = getServicePackages(service);
           return (
             <div
               key={service.id}
@@ -111,6 +126,11 @@ export default function ServicesPage() {
                             <div className="font-semibold text-zinc-200">{pkg.name}</div>
                             <div className="text-[10px] text-zinc-400">{pkg.duration}</div>
                           </div>
+                          {pkg.price && (
+                            <span className="font-bold text-gold-400 text-xs shrink-0">
+                              {pkg.price.toLocaleString()} ETB
+                            </span>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -124,7 +144,7 @@ export default function ServicesPage() {
                     className="px-4 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 text-xs font-semibold text-zinc-200 hover:border-gold-500/40 hover:text-gold-400 transition-all flex items-center gap-1.5"
                   >
                     <Info className="w-4 h-4 text-gold-400" />
-                    <span>View Packages</span>
+                    <span>View Packages ({servicePkgs.length})</span>
                   </button>
 
                   <Link
@@ -163,60 +183,83 @@ export default function ServicesPage() {
             </div>
 
             <div className="overflow-y-auto space-y-4 pr-1">
-              {getServicePackages(activeServiceModal.id).map((pkg) => (
-                <div
-                  key={pkg.id}
-                  className={`p-6 rounded-2xl border ${
-                    pkg.isPopular
-                      ? 'bg-gold-500/10 border-gold-500/50 shadow-gold-sm'
-                      : 'bg-zinc-900/80 border-zinc-800'
-                  } space-y-4`}
-                >
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-serif text-xl font-bold text-zinc-100">
-                          {pkg.name}
-                        </h3>
-                        {pkg.isPopular && (
-                          <span className="px-2.5 py-0.5 rounded-full bg-gold-500 text-dark-bg text-[10px] font-bold uppercase tracking-wider">
-                            Popular
-                          </span>
-                        )}
+              {getServicePackages(activeServiceModal).length > 0 ? (
+                getServicePackages(activeServiceModal).map((pkg) => (
+                  <div
+                    key={pkg.id}
+                    className={`p-6 rounded-2xl border ${
+                      pkg.isPopular
+                        ? 'bg-gold-500/10 border-gold-500/50 shadow-gold-sm'
+                        : 'bg-zinc-900/80 border-zinc-800'
+                    } space-y-4`}
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-serif text-xl font-bold text-zinc-100">
+                            {pkg.name}
+                          </h3>
+                          {pkg.isPopular && (
+                            <span className="px-2.5 py-0.5 rounded-full bg-gold-500 text-dark-bg text-[10px] font-bold uppercase tracking-wider">
+                              Popular
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-zinc-400">{pkg.tagline}</p>
                       </div>
-                      <p className="text-xs text-zinc-400">{pkg.tagline}</p>
+
+                      <div className="text-right">
+                        <span className="text-lg font-bold text-gold-400 block">
+                          {pkg.price ? `${pkg.price.toLocaleString()} ETB` : ''}
+                        </span>
+                        <span className="text-xs font-semibold text-zinc-400 block">{pkg.duration}</span>
+                      </div>
                     </div>
 
-                    <div className="text-right">
-                      <span className="text-xs font-semibold text-gold-400 block">{pkg.duration}</span>
+                    {pkg.features && pkg.features.length > 0 && (
+                      <div className="pt-2 border-t border-zinc-800/60">
+                        <span className="text-xs font-semibold text-zinc-300 block mb-2">
+                          Included Features & Deliverables:
+                        </span>
+                        <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-zinc-300">
+                          {pkg.features.map((feature, idx) => (
+                            <li key={idx} className="flex items-center gap-2">
+                              <CheckCircle2 className="w-4 h-4 text-gold-400 shrink-0" />
+                              <span>{feature}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    <div className="pt-2 flex justify-end">
+                      <Link
+                        href={`/booking?service=${activeServiceModal.id}&package=${pkg.id}`}
+                        className="gold-btn px-6 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center gap-2"
+                      >
+                        <span>Select {pkg.name}</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </Link>
                     </div>
                   </div>
-
-                  <div className="pt-2 border-t border-zinc-800/60">
-                    <span className="text-xs font-semibold text-zinc-300 block mb-2">
-                      Included Features & Deliverables:
-                    </span>
-                    <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-zinc-300">
-                      {pkg.features.map((feature, idx) => (
-                        <li key={idx} className="flex items-center gap-2">
-                          <CheckCircle2 className="w-4 h-4 text-gold-400 shrink-0" />
-                          <span>{feature}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <div className="pt-2 flex justify-end">
-                    <Link
-                      href={`/booking?service=${activeServiceModal.id}&package=${pkg.id}`}
-                      className="gold-btn px-6 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center gap-2"
-                    >
-                      <span>Select {pkg.name}</span>
-                      <ArrowRight className="w-4 h-4" />
-                    </Link>
-                  </div>
+                ))
+              ) : (
+                <div className="p-8 rounded-2xl bg-zinc-900/80 border border-zinc-800 text-center space-y-4">
+                  <p className="text-sm text-zinc-300">
+                    Custom tailored sessions are available for {activeServiceModal.title}.
+                  </p>
+                  <p className="text-xs text-zinc-400">
+                    Starting price from {activeServiceModal.startingPrice?.toLocaleString()} ETB. Contact us directly or start a booking to configure your session.
+                  </p>
+                  <Link
+                    href={`/booking?service=${activeServiceModal.id}`}
+                    className="gold-btn inline-flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold uppercase"
+                  >
+                    <span>Book {activeServiceModal.title} Session</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </Link>
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </div>

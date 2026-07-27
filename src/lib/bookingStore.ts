@@ -78,6 +78,35 @@ export function dataURLtoBlob(dataurl: string): Blob {
   }
 }
 
+export function mapSupabaseServiceToService(row: any): Service {
+  if (!row) return row;
+  return {
+    id: row.id ? String(row.id) : `serv-${Date.now()}`,
+    title: row.title || '',
+    category: row.category || '',
+    description: row.description || '',
+    coverImage: row.cover_image || row.coverImage || '',
+    startingPrice: Number(row.starting_price ?? row.startingPrice ?? 0),
+    estimatedDuration: row.estimated_duration || row.estimatedDuration || '',
+    isEnabled: row.is_enabled !== undefined ? Boolean(row.is_enabled) : (row.isEnabled !== undefined ? Boolean(row.isEnabled) : true),
+  };
+}
+
+export function mapSupabasePackageToPackage(row: any): Package {
+  if (!row) return row;
+  return {
+    id: row.id ? String(row.id) : `pkg-${Date.now()}`,
+    serviceId: row.service_id || row.serviceId || '',
+    name: row.name || '',
+    tagline: row.tagline || '',
+    price: Number(row.price ?? 0),
+    duration: row.duration || '',
+    photographersCount: Number(row.photographers_count ?? row.photographersCount ?? 1),
+    features: Array.isArray(row.features) ? row.features : (typeof row.features === 'string' ? JSON.parse(row.features) : []),
+    isPopular: Boolean(row.is_popular ?? row.isPopular ?? false),
+  };
+}
+
 export function mapSupabaseBookingToBooking(row: any): Booking {
   if (!row) return row;
   return {
@@ -138,13 +167,14 @@ export const bookingStore = {
         if (error) {
           supabaseRestDisabled = true;
         } else if (data && data.length > 0) {
-          return data as Service[];
+          return data.map(mapSupabaseServiceToService);
         }
       } catch (e) {
         supabaseRestDisabled = true;
       }
     }
-    return getStoredData<Service[]>(STORAGE_KEYS.SERVICES, INITIAL_SERVICES);
+    const localServices = await getStoredData<Service[]>(STORAGE_KEYS.SERVICES, INITIAL_SERVICES);
+    return localServices.map(mapSupabaseServiceToService);
   },
 
   async saveService(service: Service): Promise<Service> {
@@ -196,17 +226,22 @@ export const bookingStore = {
         if (error) {
           supabaseRestDisabled = true;
         } else if (data && data.length > 0) {
-          allPackages = data as Package[];
+          allPackages = data.map(mapSupabasePackageToPackage);
         }
       } catch (e) {
         supabaseRestDisabled = true;
       }
     }
     if (allPackages.length === 0) {
-      allPackages = await getStoredData<Package[]>(STORAGE_KEYS.PACKAGES, INITIAL_PACKAGES);
+      const stored = await getStoredData<Package[]>(STORAGE_KEYS.PACKAGES, INITIAL_PACKAGES);
+      allPackages = stored.map(mapSupabasePackageToPackage);
     }
     if (serviceId) {
-      return allPackages.filter((p) => p.serviceId === serviceId);
+      const sidClean = serviceId.toLowerCase();
+      return allPackages.filter((p) => {
+        const pSid = (p.serviceId || (p as any).service_id || '').toLowerCase();
+        return pSid === sidClean;
+      });
     }
     return allPackages;
   },
