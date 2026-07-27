@@ -4,7 +4,11 @@
 -- Run this SQL in your Supabase Dashboard -> SQL Editor
 -- to register the admin user into Supabase Auth and public.admin_users table.
 
--- 1. Create public.admin_users Table
+-- 1. Enable Required Extensions
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- 2. Create public.admin_users Table
 CREATE TABLE IF NOT EXISTS public.admin_users (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   email VARCHAR(150) UNIQUE NOT NULL,
@@ -24,19 +28,24 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
--- 2. Seed Default Admin Email in public.admin_users
+-- 3. Seed Default Admin Emails in public.admin_users
 INSERT INTO public.admin_users (email, role)
-VALUES ('admin@luxphotography.com', 'admin')
+VALUES 
+  ('admin@luxphotography.com', 'admin'),
+  ('admin@abisproduction.com', 'admin')
 ON CONFLICT (email) DO NOTHING;
 
--- 3. Register & Confirm Admin User in Supabase Auth (auth.users)
--- Credentials:
--- Email: admin@luxphotography.com
+-- 4. Register & Confirm Admin Users in Supabase Auth (auth.users)
+-- Default Credentials:
+-- Email: admin@luxphotography.com (or admin@abisproduction.com)
 -- Password: AdminPassword123!
+
 DO $$
 DECLARE
-  new_user_id UUID := gen_random_uuid();
+  uid1 UUID := gen_random_uuid();
+  uid2 UUID := gen_random_uuid();
 BEGIN
+  -- Seed admin@luxphotography.com
   IF NOT EXISTS (SELECT 1 FROM auth.users WHERE email = 'admin@luxphotography.com') THEN
     INSERT INTO auth.users (
       instance_id,
@@ -59,7 +68,7 @@ BEGIN
       recovery_token
     ) VALUES (
       '00000000-0000-0000-0000-000000000000',
-      new_user_id,
+      uid1,
       'authenticated',
       'authenticated',
       'admin@luxphotography.com',
@@ -78,7 +87,6 @@ BEGIN
       ''
     );
 
-    -- Insert into auth.identities for email provider
     INSERT INTO auth.identities (
       id,
       user_id,
@@ -89,14 +97,77 @@ BEGIN
       updated_at,
       provider_id
     ) VALUES (
-      new_user_id,
-      new_user_id,
-      format('{"sub":"%s","email":"%s"}', new_user_id, 'admin@luxphotography.com')::jsonb,
+      uid1,
+      uid1,
+      format('{"sub":"%s","email":"%s"}', uid1, 'admin@luxphotography.com')::jsonb,
       'email',
       now(),
       now(),
       now(),
       'admin@luxphotography.com'
+    );
+  END IF;
+
+  -- Seed admin@abisproduction.com
+  IF NOT EXISTS (SELECT 1 FROM auth.users WHERE email = 'admin@abisproduction.com') THEN
+    INSERT INTO auth.users (
+      instance_id,
+      id,
+      aud,
+      role,
+      email,
+      encrypted_password,
+      email_confirmed_at,
+      recovery_sent_at,
+      last_sign_in_at,
+      raw_app_meta_data,
+      raw_user_meta_data,
+      is_super_admin,
+      created_at,
+      updated_at,
+      confirmation_token,
+      email_change,
+      email_change_token_new,
+      recovery_token
+    ) VALUES (
+      '00000000-0000-0000-0000-000000000000',
+      uid2,
+      'authenticated',
+      'authenticated',
+      'admin@abisproduction.com',
+      crypt('AdminPassword123!', gen_salt('bf')),
+      now(),
+      now(),
+      now(),
+      '{"provider":"email","providers":["email"]}',
+      '{"name":"Abis Studio Admin"}',
+      false,
+      now(),
+      now(),
+      '',
+      '',
+      '',
+      ''
+    );
+
+    INSERT INTO auth.identities (
+      id,
+      user_id,
+      identity_data,
+      provider,
+      last_sign_in_at,
+      created_at,
+      updated_at,
+      provider_id
+    ) VALUES (
+      uid2,
+      uid2,
+      format('{"sub":"%s","email":"%s"}', uid2, 'admin@abisproduction.com')::jsonb,
+      'email',
+      now(),
+      now(),
+      now(),
+      'admin@abisproduction.com'
     );
   END IF;
 END $$;
