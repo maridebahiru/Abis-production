@@ -114,6 +114,19 @@ CREATE TABLE IF NOT EXISTS public.site_settings (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
 );
 
+-- 8. Admin Users Table
+CREATE TABLE IF NOT EXISTS public.admin_users (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  email VARCHAR(150) UNIQUE NOT NULL,
+  role VARCHAR(50) DEFAULT 'admin',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
+);
+
+-- Seed default admin user record
+INSERT INTO public.admin_users (email, role)
+VALUES ('admin@luxphotography.com', 'admin')
+ON CONFLICT (email) DO NOTHING;
+
 -- =========================================================
 -- ROW LEVEL SECURITY (RLS) POLICIES
 -- =========================================================
@@ -125,6 +138,7 @@ ALTER TABLE public.bookings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.portfolio_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.payment_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.site_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.admin_users ENABLE ROW LEVEL SECURITY;
 
 -- Public Read Policies
 CREATE POLICY "Allow public read services" ON public.services FOR SELECT USING (true);
@@ -133,6 +147,7 @@ CREATE POLICY "Allow public read blocked dates" ON public.blocked_dates FOR SELE
 CREATE POLICY "Allow public read portfolio" ON public.portfolio_items FOR SELECT USING (true);
 CREATE POLICY "Allow public read payment settings" ON public.payment_settings FOR SELECT USING (true);
 CREATE POLICY "Allow public read site settings" ON public.site_settings FOR SELECT USING (true);
+CREATE POLICY "Allow public read admin users" ON public.admin_users FOR SELECT USING (true);
 
 -- Booking Lookup & Public Insertion
 CREATE POLICY "Allow public insert bookings" ON public.bookings FOR INSERT WITH CHECK (true);
@@ -146,3 +161,4 @@ CREATE POLICY "Allow admin manage packages" ON public.packages FOR ALL USING (au
 CREATE POLICY "Allow admin manage portfolio" ON public.portfolio_items FOR ALL USING (auth.role() = 'authenticated');
 CREATE POLICY "Allow admin manage payment settings" ON public.payment_settings FOR ALL USING (auth.role() = 'authenticated');
 CREATE POLICY "Allow admin manage site settings" ON public.site_settings FOR ALL USING (auth.role() = 'authenticated');
+CREATE POLICY "Allow admin manage admin users" ON public.admin_users FOR ALL USING (auth.role() = 'authenticated');

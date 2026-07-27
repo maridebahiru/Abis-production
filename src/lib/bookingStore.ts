@@ -869,6 +869,19 @@ export const bookingStore = {
     }
   },
 
+  async ensureAdminUserInDB(email: string): Promise<void> {
+    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+      try {
+        await supabase.from('admin_users').upsert(
+          [{ email: email.toLowerCase(), role: 'admin' }],
+          { onConflict: 'email' }
+        );
+      } catch (e) {
+        // Silently handled
+      }
+    }
+  },
+
   // --- Supabase Authentication Helpers ---
   async loginAdminWithSupabase(email: string, pass: string): Promise<{ success: boolean; error?: string }> {
     const cleanEmail = email.trim().toLowerCase();
@@ -890,6 +903,7 @@ export const bookingStore = {
 
         if (!error && (data.session || data.user)) {
           this.setAdminAuthenticated(true);
+          await this.ensureAdminUserInDB(cleanEmail);
           return { success: true };
         }
 
@@ -900,6 +914,7 @@ export const bookingStore = {
         });
         if (signupRes.data.user || signupRes.data.session) {
           this.setAdminAuthenticated(true);
+          await this.ensureAdminUserInDB(cleanEmail);
           return { success: true };
         }
       } catch (err: any) {
@@ -909,6 +924,7 @@ export const bookingStore = {
 
     // Always grant admin session if email is admin@luxphotography.com and password length >= 6
     this.setAdminAuthenticated(true);
+    await this.ensureAdminUserInDB(cleanEmail);
     return { success: true };
   },
 
