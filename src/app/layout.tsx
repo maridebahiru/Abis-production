@@ -18,6 +18,7 @@ const cormorant = Cormorant_Garamond({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL('https://abisproduction.com'),
   title: 'Abis Production | Photography & Videography Studio | Addis Ababa',
   description: 'Abis Production - Premier professional photography and videography services for weddings, graduation, studio sessions, corporate events, and pre-wedding shoots. Book online with Telebirr, CBE Birr & Bank Transfer.',
   keywords: [
@@ -38,7 +39,7 @@ export const metadata: Metadata = {
     siteName: 'Abis Production Studio',
     images: [
       {
-        url: 'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&q=80&w=1200',
+        url: '/abis-production-og-cover.png',
         width: 1200,
         height: 630,
         alt: 'Abis Production Photography Studio',
@@ -46,6 +47,12 @@ export const metadata: Metadata = {
     ],
     locale: 'en_US',
     type: 'website',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Abis Production | Luxury Photography & Cinema Studio',
+    description: 'Timeless visual storytelling, 4K wedding films, and editorial studio photography by Abis Production.',
+    images: ['/abis-production-og-cover.png'],
   },
 };
 
@@ -58,7 +65,7 @@ export default function RootLayout({
     '@context': 'https://schema.org',
     '@type': 'PhotographyBusiness',
     name: 'Abis Production Studio & Cinema',
-    image: 'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&q=80&w=1200',
+    image: 'https://abisproduction.com/abis-production-og-cover.png',
     '@id': 'https://abisproduction.com',
     url: 'https://abisproduction.com',
     telephone: '+251911234567',

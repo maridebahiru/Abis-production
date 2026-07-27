@@ -20,6 +20,7 @@
 /* Luxury Gold Text Gradient */
 .text-gold-gradient {
   background: linear-gradient(135deg, #FFF0C2 0%, #D4AF37 50%, #AA771C 100%);
+  background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
