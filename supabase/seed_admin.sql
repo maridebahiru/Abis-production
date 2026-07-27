@@ -171,3 +171,42 @@ BEGIN
     );
   END IF;
 END $$;
+
+-- =========================================================
+-- 5. CREATE SUPABASE STORAGE BUCKET FOR PORTFOLIO MEDIA (VIDEOS & IMAGES)
+-- =========================================================
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'portfolio', 
+  'portfolio', 
+  true, 
+  524288000, -- 500MB max file size
+  ARRAY[
+    'image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif',
+    'video/mp4', 'video/webm', 'video/quicktime', 'video/mov', 'video/x-m4v', 'video/avi'
+  ]
+)
+ON CONFLICT (id) DO UPDATE SET 
+  public = true,
+  file_size_limit = 524288000;
+
+-- Storage RLS Policies
+DO $$ BEGIN
+  CREATE POLICY "Allow public read portfolio storage" ON storage.objects
+    FOR SELECT USING (bucket_id = 'portfolio');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "Allow public insert portfolio storage" ON storage.objects
+    FOR INSERT WITH CHECK (bucket_id = 'portfolio');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "Allow public update portfolio storage" ON storage.objects
+    FOR UPDATE USING (bucket_id = 'portfolio');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "Allow public delete portfolio storage" ON storage.objects
+    FOR DELETE USING (bucket_id = 'portfolio');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;

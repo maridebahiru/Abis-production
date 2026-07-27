@@ -162,3 +162,21 @@ CREATE POLICY "Allow admin manage portfolio" ON public.portfolio_items FOR ALL U
 CREATE POLICY "Allow admin manage payment settings" ON public.payment_settings FOR ALL USING (auth.role() = 'authenticated');
 CREATE POLICY "Allow admin manage site settings" ON public.site_settings FOR ALL USING (auth.role() = 'authenticated');
 CREATE POLICY "Allow admin manage admin users" ON public.admin_users FOR ALL USING (auth.role() = 'authenticated');
+
+-- =========================================================
+-- STORAGE BUCKETS (MEDIA & BTS VIDEOS)
+-- =========================================================
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'portfolio', 
+  'portfolio', 
+  true, 
+  524288000,
+  ARRAY[
+    'image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif',
+    'video/mp4', 'video/webm', 'video/quicktime', 'video/mov', 'video/x-m4v', 'video/avi'
+  ]
+)
+ON CONFLICT (id) DO UPDATE SET 
+  public = true,
+  file_size_limit = 524288000;
