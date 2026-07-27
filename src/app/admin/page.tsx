@@ -127,10 +127,6 @@ export default function AdminDashboardPage() {
   const [batchImageFiles, setBatchImageFiles] = useState<File[]>([]);
   const [uploadProgressText, setUploadProgressText] = useState<string>('');
 
-  // Date Block State
-  const [newBlockDate, setNewBlockDate] = useState<string>('');
-  const [blockReason, setBlockReason] = useState<string>('Studio Maintenance');
-
   const handleBtsVideoFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -245,6 +241,7 @@ export default function AdminDashboardPage() {
     const port = await bookingStore.getPortfolioItems();
     const pay = await bookingStore.getPaymentSettings();
     const setts = await bookingStore.getWebsiteSettings();
+    const admins = await bookingStore.getAdminUsers();
 
     setBookings(b);
     setServices(s);
@@ -253,6 +250,38 @@ export default function AdminDashboardPage() {
     setPortfolioItems(port);
     setPaymentSettings(pay);
     setSiteSettings(setts);
+    setAdminUsers(admins);
+  };
+
+  const handleAddAdminUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminUserError('');
+    setAdminUserSuccess('');
+
+    const res = await bookingStore.createAdminUser(newAdminEmail, newAdminRole, newAdminPassword);
+    if (res.success) {
+      setAdminUserSuccess(`Successfully registered ${newAdminEmail} as ${newAdminRole}!`);
+      setNewAdminEmail('');
+      setNewAdminPassword('AdminPassword123!');
+      refreshData();
+      setTimeout(() => {
+        setAdminUserModalOpen(false);
+        setAdminUserSuccess('');
+      }, 1200);
+    } else {
+      setAdminUserError(res.error || 'Failed to add admin user.');
+    }
+  };
+
+  const handleDeleteAdminUser = async (id: string, email: string) => {
+    if (!confirm(`Are you sure you want to revoke access for ${email}?`)) return;
+    await bookingStore.deleteAdminUser(id);
+    refreshData();
+  };
+
+  const handleChangeAdminRole = async (id: string, role: AdminUserRole) => {
+    await bookingStore.updateAdminUserRole(id, role);
+    refreshData();
   };
 
   const handleLogout = async () => {
