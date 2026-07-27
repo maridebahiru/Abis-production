@@ -326,13 +326,17 @@ export const bookingStore = {
               }
             }
           } catch (e) {
-            supabaseStorageDisabled = true;
+            console.warn('Supabase storage video upload exception:', e);
           }
         }
 
-        if (typeof window !== 'undefined' && window.URL) {
-          return URL.createObjectURL(file);
-        }
+        // Persistent DataURL for local video uploads (never expires on refresh)
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve((e.target?.result as string) || '');
+          reader.onerror = () => resolve('');
+          reader.readAsDataURL(file);
+        });
       }
 
       if (isSupabaseConfigured && supabase && !supabaseStorageDisabled && file.type.startsWith('image/')) {

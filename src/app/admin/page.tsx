@@ -1677,9 +1677,13 @@ export default function AdminDashboardPage() {
                           Remove
                         </button>
                       </div>
-                      {portfolioForm.btsVideoUrl.startsWith('data:video') || portfolioForm.btsVideoUrl.endsWith('.mp4') || portfolioForm.btsVideoUrl.endsWith('.webm') ? (
-                        <video src={portfolioForm.btsVideoUrl} controls className="w-full h-28 rounded-lg bg-black object-contain" />
-                      ) : null}
+                      {!portfolioForm.btsVideoUrl.includes('youtube') && !portfolioForm.btsVideoUrl.includes('vimeo') ? (
+                        <video src={portfolioForm.btsVideoUrl} controls className="w-full h-32 rounded-lg bg-black object-contain" />
+                      ) : (
+                        <span className="text-[10px] text-gold-300 font-mono block truncate">
+                          URL: {portfolioForm.btsVideoUrl}
+                        </span>
+                      )}
                     </div>
                   )}
 

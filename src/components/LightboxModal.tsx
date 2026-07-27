@@ -15,42 +15,57 @@ interface LightboxModalProps {
 function renderBtsVideo(url: string) {
   if (!url) return null;
 
-  const isDirectVideo = 
-    url.startsWith('blob:') ||
-    url.startsWith('data:video') ||
-    url.endsWith('.mp4') ||
-    url.endsWith('.webm') ||
-    url.endsWith('.mov') ||
-    (!url.includes('youtube') && !url.includes('youtu.be') && !url.includes('vimeo'));
+  const cleanUrl = url.trim();
 
-  if (isDirectVideo) {
+  // YouTube Embed Handling
+  if (cleanUrl.includes('youtube.com') || cleanUrl.includes('youtu.be')) {
+    let embedUrl = cleanUrl;
+    if (cleanUrl.includes('youtube.com/watch?v=')) {
+      const videoId = cleanUrl.split('v=')[1]?.split('&')[0];
+      embedUrl = `https://www.youtube.com/embed/${videoId}?autoplay=1`;
+    } else if (cleanUrl.includes('youtu.be/')) {
+      const videoId = cleanUrl.split('youtu.be/')[1]?.split('?')[0];
+      embedUrl = `https://www.youtube.com/embed/${videoId}?autoplay=1`;
+    }
     return (
-      <video
-        src={url}
-        controls
-        playsInline
-        className="w-full h-full object-contain bg-black rounded-xl"
+      <iframe
+        src={embedUrl}
+        title="Behind the scenes video"
+        className="w-full h-full border-0 rounded-xl"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        allowFullScreen
       />
     );
   }
 
-  let embedUrl = url;
-  if (url.includes('youtube.com/watch?v=')) {
-    const videoId = url.split('v=')[1]?.split('&')[0];
-    embedUrl = `https://www.youtube.com/embed/${videoId}`;
-  } else if (url.includes('youtu.be/')) {
-    const videoId = url.split('youtu.be/')[1]?.split('?')[0];
-    embedUrl = `https://www.youtube.com/embed/${videoId}`;
+  // Vimeo Embed Handling
+  if (cleanUrl.includes('vimeo.com')) {
+    const videoId = cleanUrl.split('vimeo.com/')[1]?.split('?')[0];
+    const embedUrl = `https://player.vimeo.com/video/${videoId}`;
+    return (
+      <iframe
+        src={embedUrl}
+        title="Vimeo video"
+        className="w-full h-full border-0 rounded-xl"
+        allow="autoplay; fullscreen; picture-in-picture"
+        allowFullScreen
+      />
+    );
   }
 
+  // Direct Video File (DataURL, Supabase Storage, Blob, MP4, WEBM, MOV)
   return (
-    <iframe
-      src={embedUrl}
-      title="Behind the scenes video"
-      className="w-full h-full border-0"
-      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-      allowFullScreen
-    />
+    <video
+      src={cleanUrl}
+      controls
+      autoPlay
+      playsInline
+      preload="auto"
+      className="w-full h-full object-contain bg-black rounded-xl"
+    >
+      <source src={cleanUrl} />
+      Your browser does not support playing this video format.
+    </video>
   );
 }
 
