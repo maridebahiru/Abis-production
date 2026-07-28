@@ -51,9 +51,8 @@ const STORAGE_KEYS = {
   ADMIN_USERS: 'abis_photo_admin_users_v3',
 };
 
-// Flags to silently fallback to IndexedDB if remote Supabase tables/buckets don't exist yet
+// Flags to silently fallback to IndexedDB if remote Supabase buckets don't exist yet
 let supabaseStorageDisabled = false;
-let supabaseRestDisabled = false;
 
 export const INITIAL_WEBSITE_SETTINGS: WebsiteSettings = {
   heroTitle: "Immortalizing Life's Moments With Elegance & Masterful Quality",
@@ -213,16 +212,14 @@ function setAuthCookie(authenticated: boolean) {
 export const bookingStore = {
   // --- SERVICES CRUD ---
   async getServices(): Promise<Service[]> {
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         const { data, error } = await supabase.from('services').select('*');
-        if (error) {
-          supabaseRestDisabled = true;
-        } else if (data && data.length > 0) {
+        if (!error && data && data.length > 0) {
           return data.map(mapSupabaseServiceToService);
         }
       } catch (e) {
-        supabaseRestDisabled = true;
+        console.warn('getServices exception', e);
       }
     }
     const localServices = await getStoredData<Service[]>(STORAGE_KEYS.SERVICES, INITIAL_SERVICES);
@@ -244,7 +241,7 @@ export const bookingStore = {
     }
     await setStoredData(STORAGE_KEYS.SERVICES, updated);
 
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         await supabase.from('services').upsert([service]);
       } catch (e) {
@@ -259,7 +256,7 @@ export const bookingStore = {
     const updated = services.filter((s) => s.id !== id);
     await setStoredData(STORAGE_KEYS.SERVICES, updated);
 
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         await supabase.from('services').delete().eq('id', id);
       } catch (e) {
@@ -272,16 +269,14 @@ export const bookingStore = {
   // --- PACKAGES CRUD ---
   async getPackages(serviceId?: string): Promise<Package[]> {
     let allPackages: Package[] = [];
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         const { data, error } = await supabase.from('packages').select('*');
-        if (error) {
-          supabaseRestDisabled = true;
-        } else if (data && data.length > 0) {
+        if (!error && data && data.length > 0) {
           allPackages = data.map(mapSupabasePackageToPackage);
         }
       } catch (e) {
-        supabaseRestDisabled = true;
+        console.warn('getPackages exception', e);
       }
     }
     if (allPackages.length === 0) {
@@ -310,7 +305,7 @@ export const bookingStore = {
     }
     await setStoredData(STORAGE_KEYS.PACKAGES, updated);
 
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         await supabase.from('packages').upsert([pkg]);
       } catch (e) {
@@ -325,7 +320,7 @@ export const bookingStore = {
     const updated = packages.filter((p) => p.id !== id);
     await setStoredData(STORAGE_KEYS.PACKAGES, updated);
 
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         await supabase.from('packages').delete().eq('id', id);
       } catch (e) {
@@ -339,72 +334,120 @@ export const bookingStore = {
   async uploadMediaFile(file: File): Promise<string> {
     if (!file) return '';
 
-    try {
-      if (file.type.startsWith('video/')) {
-        if (isSupabaseConfigured && supabase && !supabaseStorageDisabled) {
-          try {
-            const fileExt = file.name.split('.').pop() || 'mp4';
-            const fileName = `video_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
-            const filePath = `uploads/${fileName}`;
-
-            const { data, error } = await supabase.storage
-              .from('portfolio')
-              .upload(filePath, file, { upsert: true, contentType: file.type });
-
-            if (!error && data) {
-              const { data: publicUrlData } = supabase.storage
-                .from('portfolio')
-                .getPublicUrl(filePath);
-              if (publicUrlData?.publicUrl) {
-                return publicUrlData.publicUrl;
-              }
-            }
-          } catch (e) {
-            console.warn('Supabase storage video upload exception:', e);
-          }
-        }
-
-        // Persistent DataURL for local video uploads (never expires on refresh)
-        return new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onload = (e) => resolve((e.target?.result as string) || '');
-          reader.onerror = () => resolve('');
-          reader.readAsDataURL(file);
-        });
+    const MAX_VIDEO_SIZE = 524288000; // 500MB limit
+    if (file.type.startsWith('video/')) {
+      if (file.size > MAX_VIDEO_SIZE) {
+        throw new Error(`Video file size exceeds maximum limit of 500MB (${(file.size / (1024 * 1024)).toFixed(1)}MB provided).`);
       }
 
-      if (isSupabaseConfigured && supabase && !supabaseStorageDisabled && file.type.startsWith('image/')) {
-        try {
-          const fileExt = file.name.split('.').pop() || 'jpeg';
-          const fileName = `media_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
-          const filePath = `uploads/${fileName}`;
+      if (isSupabaseConfigured && supabase && !supabaseStorageDisabled) {
+        const fileExt = file.name.split('.').pop() || 'mp4';
+        const fileName = `video_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
+        const filePath = `uploads/${fileName}`;
 
-          const { data, error } = await supabase.storage
+        const { data, error } = await supabase.storage
+          .from('portfolio')
+          .upload(filePath, file, { upsert: true, contentType: file.type });
+
+        if (error) {
+          console.error('Supabase storage video upload error:', error);
+          throw new Error(`Supabase video upload failed: ${error.message}`);
+        }
+
+        if (data) {
+          const { data: publicUrlData } = supabase.storage
             .from('portfolio')
-            .upload(filePath, file, { upsert: true, contentType: file.type });
-
-          if (!error && data) {
-            const { data: publicUrlData } = supabase.storage
-              .from('portfolio')
-              .getPublicUrl(filePath);
-            if (publicUrlData?.publicUrl) {
-              return publicUrlData.publicUrl;
-            }
-          } else {
-            supabaseStorageDisabled = true;
+            .getPublicUrl(filePath);
+          if (publicUrlData?.publicUrl) {
+            return publicUrlData.publicUrl;
           }
-        } catch (e) {
-          supabaseStorageDisabled = true;
         }
       }
 
-      // Fast client-side image compression to lightweight dataURL
-      const compressedDataUrl = await compressImage(file, 1600, 1600, 0.78);
-      if (compressedDataUrl && compressedDataUrl.length > 50) {
-        return compressedDataUrl;
+      // Persistent DataURL for local video uploads in demo mode
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve((e.target?.result as string) || '');
+        reader.onerror = (e) => reject(new Error('Failed to read video file.'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    if (isSupabaseConfigured && supabase && !supabaseStorageDisabled && file.type.startsWith('image/')) {
+      try {
+        const fileExt = file.name.split('.').pop() || 'jpeg';
+        const fileName = `media_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
+        const filePath = `uploads/${fileName}`;
+
+        const { data, error } = await supabase.storage
+          .from('portfolio')
+          .upload(filePath, file, { upsert: true, contentType: file.type });
+
+        if (!error && data) {
+          const { data: publicUrlData } = supabase.storage
+            .from('portfolio')
+            .getPublicUrl(filePath);
+          if (publicUrlData?.publicUrl) {
+            return publicUrlData.publicUrl;
+          }
+        } else if (error) {
+          console.warn('Supabase storage image upload warning:', error);
+        }
+      } catch (e) {
+        console.warn('Image upload exception:', e);
       }
-    } catch (e) {
-      console.warn('Upload fallback warning', e);
+    }
+
+    // Fast client-side image compression to lightweight dataURL
+    const compressedDataUrl = await compressImage(file, 1600, 1600, 0.78);
+    if (compressedDataUrl && compressedDataUrl.length > 50) {
+      return compressedDataUrl;
+    }
+
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve((e.target?.result as string) || '');
+      reader.onerror = () => resolve('');
+      reader.readAsDataURL(file);
+    });
+  },
+
+  async uploadReceiptFile(file: File, referenceNumber?: string): Promise<string> {
+    if (!file) return '';
+
+    const MAX_RECEIPT_SIZE = 20971520; // 20MB limit
+    if (file.size > MAX_RECEIPT_SIZE) {
+      throw new Error(`Receipt file size exceeds maximum limit of 20MB (${(file.size / (1024 * 1024)).toFixed(1)}MB provided).`);
+    }
+
+    const ref = referenceNumber ? referenceNumber.replace(/[^a-zA-Z0-9_-]/g, '_') : `ref_${Date.now()}`;
+    const sanitizedName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const filePath = `receipts/${ref}/${Date.now()}_${sanitizedName}`;
+
+    if (isSupabaseConfigured && supabase && !supabaseStorageDisabled) {
+      try {
+        const { data, error } = await supabase.storage
+          .from('receipts')
+          .upload(filePath, file, { upsert: true, contentType: file.type });
+
+        if (!error && data) {
+          const { data: publicUrlData } = supabase.storage
+            .from('receipts')
+            .getPublicUrl(filePath);
+          if (publicUrlData?.publicUrl) {
+            return publicUrlData.publicUrl;
+          }
+        } else if (error) {
+          console.warn('Supabase receipts upload warning:', error);
+        }
+      } catch (e) {
+        console.warn('Receipt upload exception:', e);
+      }
+    }
+
+    if (file.type.startsWith('image/')) {
+      const compressed = await compressImage(file, 1600, 1600, 0.82);
+      if (compressed && compressed.length > 50) return compressed;
     }
 
     return new Promise((resolve) => {
@@ -416,16 +459,14 @@ export const bookingStore = {
   },
 
   async getPortfolioItems(): Promise<PortfolioItem[]> {
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         const { data, error } = await supabase.from('portfolio_items').select('*').order('display_order', { ascending: true });
-        if (error) {
-          supabaseRestDisabled = true;
-        } else if (data && data.length > 0) {
+        if (!error && data && data.length > 0) {
           return data.map(mapSupabasePortfolioItemToPortfolioItem);
         }
       } catch (e) {
-        supabaseRestDisabled = true;
+        console.warn('getPortfolioItems exception', e);
       }
     }
     const stored = await getStoredData<PortfolioItem[]>(STORAGE_KEYS.PORTFOLIO, PORTFOLIO_ITEMS);
@@ -447,7 +488,7 @@ export const bookingStore = {
     }
     await setStoredData(STORAGE_KEYS.PORTFOLIO, updated);
 
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         const dbRow = mapPortfolioItemToSupabaseRow(item);
         const { error } = await supabase.from('portfolio_items').upsert([dbRow]);
@@ -476,7 +517,7 @@ export const bookingStore = {
     const updated = [...processed, ...existing];
     await setStoredData(STORAGE_KEYS.PORTFOLIO, updated);
 
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         const dbRows = processed.map(mapPortfolioItemToSupabaseRow);
         await supabase.from('portfolio_items').upsert(dbRows);
@@ -492,7 +533,7 @@ export const bookingStore = {
     const updated = items.filter((p) => p.id !== id);
     await setStoredData(STORAGE_KEYS.PORTFOLIO, updated);
 
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         await supabase.from('portfolio_items').delete().eq('id', id);
       } catch (e) {
@@ -506,7 +547,7 @@ export const bookingStore = {
     const reordered = items.map((item, idx) => ({ ...item, displayOrder: idx }));
     await setStoredData(STORAGE_KEYS.PORTFOLIO, reordered);
 
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         for (const item of reordered) {
           await supabase.from('portfolio_items').update({ display_order: item.displayOrder }).eq('id', item.id);
@@ -520,16 +561,14 @@ export const bookingStore = {
 
   // --- PAYMENT SETTINGS CRUD ---
   async getPaymentSettings(): Promise<PaymentAccountDetails[]> {
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         const { data, error } = await supabase.from('payment_settings').select('*');
-        if (error) {
-          supabaseRestDisabled = true;
-        } else if (data && data.length > 0) {
+        if (!error && data && data.length > 0) {
           return data as PaymentAccountDetails[];
         }
       } catch (e) {
-        supabaseRestDisabled = true;
+        console.warn('getPaymentSettings exception', e);
       }
     }
     return getStoredData<PaymentAccountDetails[]>(STORAGE_KEYS.PAYMENTS, PAYMENT_METHODS);
@@ -547,7 +586,7 @@ export const bookingStore = {
     }
     await setStoredData(STORAGE_KEYS.PAYMENTS, updated);
 
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         await supabase.from('payment_settings').upsert([setting]);
       } catch (e) {
@@ -559,16 +598,14 @@ export const bookingStore = {
 
   // --- WEBSITE CONTENT SETTINGS CRUD ---
   async getWebsiteSettings(): Promise<WebsiteSettings> {
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         const { data, error } = await supabase.from('site_settings').select('*').eq('key', 'main_config').maybeSingle();
-        if (error) {
-          supabaseRestDisabled = true;
-        } else if (data && data.value) {
+        if (!error && data && data.value) {
           return data.value as WebsiteSettings;
         }
       } catch (e) {
-        supabaseRestDisabled = true;
+        console.warn('getWebsiteSettings exception', e);
       }
     }
     return getStoredData<WebsiteSettings>(STORAGE_KEYS.SETTINGS, INITIAL_WEBSITE_SETTINGS);
@@ -580,7 +617,7 @@ export const bookingStore = {
     }
     await setStoredData(STORAGE_KEYS.SETTINGS, settings);
 
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         await supabase.from('site_settings').upsert([{ key: 'main_config', value: settings }]);
       } catch (e) {
@@ -593,19 +630,19 @@ export const bookingStore = {
   // --- BOOKINGS & RECEIPTS CRUD ---
   async getBookings(): Promise<Booking[]> {
     let supabaseBookings: Booking[] = [];
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         const { data, error } = await supabase
           .from('bookings')
           .select('*')
           .order('created_at', { ascending: false });
         if (error) {
-          supabaseRestDisabled = true;
+          console.warn('Supabase getBookings error:', error.message);
         } else if (data) {
           supabaseBookings = data.map(mapSupabaseBookingToBooking);
         }
       } catch (e) {
-        supabaseRestDisabled = true;
+        console.warn('Supabase getBookings exception:', e);
       }
     }
     const localBookings = await getStoredData<Booking[]>(STORAGE_KEYS.BOOKINGS, INITIAL_BOOKINGS);
@@ -657,7 +694,7 @@ export const bookingStore = {
     const updatedBookings = [newBooking, ...currentBookings];
     await setStoredData(STORAGE_KEYS.BOOKINGS, updatedBookings);
 
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         await supabase.from('bookings').insert([
           {
@@ -751,7 +788,7 @@ export const bookingStore = {
       await setStoredData(STORAGE_KEYS.BOOKINGS, [target, ...currentBookings]);
     }
 
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         await supabase
           .from('bookings')
@@ -785,7 +822,7 @@ export const bookingStore = {
     target.paymentStatus = 'Rejected';
     await setStoredData(STORAGE_KEYS.BOOKINGS, currentBookings);
 
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         await supabase
           .from('bookings')
@@ -810,7 +847,7 @@ export const bookingStore = {
     currentBookings[index].galleryPhotos = photos;
     await setStoredData(STORAGE_KEYS.BOOKINGS, currentBookings);
 
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         await supabase
           .from('bookings')
@@ -832,7 +869,7 @@ export const bookingStore = {
     currentBookings[index].bookingStatus = 'Photos Uploaded';
     await setStoredData(STORAGE_KEYS.BOOKINGS, currentBookings);
 
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         await supabase
           .from('bookings')
@@ -858,7 +895,7 @@ export const bookingStore = {
     currentBookings[index].selectionSubmittedAt = new Date().toISOString();
     await setStoredData(STORAGE_KEYS.BOOKINGS, currentBookings);
 
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         await supabase
           .from('bookings')
@@ -932,7 +969,7 @@ export const bookingStore = {
   },
 
   async ensureAdminUserInDB(email: string, role: AdminUserRole = 'super_admin'): Promise<void> {
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         await supabase.from('admin_users').upsert(
           [{ email: email.toLowerCase(), role }],
@@ -947,7 +984,7 @@ export const bookingStore = {
   // --- ADMIN USERS / STAFF MANAGEMENT ---
   async getAdminUsers(): Promise<AdminUser[]> {
     let supabaseAdmins: AdminUser[] = [];
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         const { data, error } = await supabase.from('admin_users').select('*');
         if (!error && data && data.length > 0) {
@@ -1025,7 +1062,7 @@ export const bookingStore = {
     );
     await setStoredData(STORAGE_KEYS.ADMIN_USERS, updated);
 
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         await supabase.from('admin_users').delete().or(`id.eq.${emailOrId},email.eq.${cleanKey}`);
       } catch (e) {
@@ -1048,7 +1085,7 @@ export const bookingStore = {
       await setStoredData(STORAGE_KEYS.ADMIN_USERS, currentAdmins);
     }
 
-    if (isSupabaseConfigured && supabase && !supabaseRestDisabled) {
+    if (isSupabaseConfigured && supabase) {
       try {
         await supabase
           .from('admin_users')
@@ -1065,12 +1102,6 @@ export const bookingStore = {
   // --- Supabase Authentication Helpers ---
   async loginAdminWithSupabase(email: string, pass: string): Promise<{ success: boolean; error?: string }> {
     const cleanEmail = email.trim().toLowerCase();
-    const admins = await this.getAdminUsers();
-    const isRegisteredAdmin = admins.some((a) => a.email.toLowerCase() === cleanEmail);
-    
-    if (!isRegisteredAdmin && !cleanEmail.includes('admin') && cleanEmail !== 'admin@luxphotography.com') {
-      return { success: false, error: 'Only authorized administrator or staff accounts can log in.' };
-    }
 
     if (pass.length < 6) {
       return { success: false, error: 'Password must be at least 6 characters.' };
@@ -1078,33 +1109,54 @@ export const bookingStore = {
 
     if (isSupabaseConfigured && supabase) {
       try {
+        // Step 1: Authenticate via Supabase Auth signInWithPassword
         const { data, error } = await supabase.auth.signInWithPassword({
           email: cleanEmail,
           password: pass,
         });
 
-        if (!error && (data.session || data.user)) {
+        if (error) {
+          return {
+            success: false,
+            error: error.message || 'Invalid email or password. Please verify your credentials or run seed_admin.sql in Supabase.',
+          };
+        }
+
+        if (data.session || data.user) {
+          const authEmail = data.user?.email?.trim().toLowerCase() || cleanEmail;
+          const { data: adminRow } = await supabase
+            .from('admin_users')
+            .select('email')
+            .eq('email', authEmail)
+            .maybeSingle();
+
+          if (!adminRow && authEmail !== 'admin@luxphotography.com' && authEmail !== 'admin@abisproduction.com') {
+            await supabase.auth.signOut();
+            return {
+              success: false,
+              error: 'Access denied. Account authenticated, but it is not registered in public.admin_users.',
+            };
+          }
+
           this.setAdminAuthenticated(true);
-          await this.ensureAdminUserInDB(cleanEmail, 'super_admin');
           return { success: true };
         }
 
-        // Try automatic account creation on Supabase Auth if user doesn't exist yet
-        const signupRes = await supabase.auth.signUp({
-          email: cleanEmail,
-          password: pass,
-        });
-        if (signupRes.data.user || signupRes.data.session) {
-          this.setAdminAuthenticated(true);
-          await this.ensureAdminUserInDB(cleanEmail, 'super_admin');
-          return { success: true };
-        }
+        return { success: false, error: 'Authentication failed. Invalid email or password.' };
       } catch (err: any) {
-        console.warn('Supabase login exception, using local admin session', err);
+        const msg = err?.message || 'An unexpected authentication error occurred.';
+        return { success: false, error: typeof msg === 'string' ? msg : 'Authentication error.' };
       }
     }
 
-    // Always grant admin session if email is admin or registered admin user
+    // Fallback for local demo mode without Supabase connection
+    const admins = await this.getAdminUsers();
+    const isRegisteredAdmin = admins.some((a) => a.email.toLowerCase() === cleanEmail);
+
+    if (!isRegisteredAdmin && !cleanEmail.includes('admin') && cleanEmail !== 'admin@luxphotography.com') {
+      return { success: false, error: 'Only authorized administrator or staff accounts can log in.' };
+    }
+
     this.setAdminAuthenticated(true);
     await this.ensureAdminUserInDB(cleanEmail, 'super_admin');
     return { success: true };

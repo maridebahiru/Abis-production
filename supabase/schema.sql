@@ -153,18 +153,18 @@ CREATE POLICY "Allow public read admin users" ON public.admin_users FOR SELECT U
 CREATE POLICY "Allow public insert bookings" ON public.bookings FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow booking reference lookup" ON public.bookings FOR SELECT USING (true);
 
--- Admin Full Access Policies
-CREATE POLICY "Allow admin full manage bookings" ON public.bookings FOR ALL USING (auth.role() = 'authenticated');
-CREATE POLICY "Allow admin full manage blocked dates" ON public.blocked_dates FOR ALL USING (auth.role() = 'authenticated');
-CREATE POLICY "Allow admin manage services" ON public.services FOR ALL USING (auth.role() = 'authenticated');
-CREATE POLICY "Allow admin manage packages" ON public.packages FOR ALL USING (auth.role() = 'authenticated');
-CREATE POLICY "Allow admin manage portfolio" ON public.portfolio_items FOR ALL USING (auth.role() = 'authenticated');
-CREATE POLICY "Allow admin manage payment settings" ON public.payment_settings FOR ALL USING (auth.role() = 'authenticated');
-CREATE POLICY "Allow admin manage site settings" ON public.site_settings FOR ALL USING (auth.role() = 'authenticated');
-CREATE POLICY "Allow admin manage admin users" ON public.admin_users FOR ALL USING (auth.role() = 'authenticated');
+-- Admin Full Access Policies (Checked against public.admin_users)
+CREATE POLICY "Allow admin full manage bookings" ON public.bookings FOR ALL USING (auth.jwt() ->> 'email' IN (SELECT email FROM public.admin_users));
+CREATE POLICY "Allow admin full manage blocked dates" ON public.blocked_dates FOR ALL USING (auth.jwt() ->> 'email' IN (SELECT email FROM public.admin_users));
+CREATE POLICY "Allow admin manage services" ON public.services FOR ALL USING (auth.jwt() ->> 'email' IN (SELECT email FROM public.admin_users));
+CREATE POLICY "Allow admin manage packages" ON public.packages FOR ALL USING (auth.jwt() ->> 'email' IN (SELECT email FROM public.admin_users));
+CREATE POLICY "Allow admin manage portfolio" ON public.portfolio_items FOR ALL USING (auth.jwt() ->> 'email' IN (SELECT email FROM public.admin_users));
+CREATE POLICY "Allow admin manage payment settings" ON public.payment_settings FOR ALL USING (auth.jwt() ->> 'email' IN (SELECT email FROM public.admin_users));
+CREATE POLICY "Allow admin manage site settings" ON public.site_settings FOR ALL USING (auth.jwt() ->> 'email' IN (SELECT email FROM public.admin_users));
+CREATE POLICY "Allow admin manage admin users" ON public.admin_users FOR ALL USING (auth.jwt() ->> 'email' IN (SELECT email FROM public.admin_users));
 
 -- =========================================================
--- STORAGE BUCKETS (MEDIA & BTS VIDEOS)
+-- STORAGE BUCKETS & POLICIES
 -- =========================================================
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES (
@@ -180,3 +180,25 @@ VALUES (
 ON CONFLICT (id) DO UPDATE SET 
   public = true,
   file_size_limit = 524288000;
+
+CREATE POLICY "Allow public read portfolio storage" ON storage.objects FOR SELECT USING (bucket_id = 'portfolio');
+CREATE POLICY "Allow admin write portfolio storage" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'portfolio' AND auth.jwt() ->> 'email' IN (SELECT email FROM public.admin_users));
+CREATE POLICY "Allow admin update portfolio storage" ON storage.objects FOR UPDATE USING (bucket_id = 'portfolio' AND auth.jwt() ->> 'email' IN (SELECT email FROM public.admin_users));
+CREATE POLICY "Allow admin delete portfolio storage" ON storage.objects FOR DELETE USING (bucket_id = 'portfolio' AND auth.jwt() ->> 'email' IN (SELECT email FROM public.admin_users));
+
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'receipts', 
+  'receipts', 
+  false, 
+  20971520,
+  ARRAY['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'application/pdf']
+)
+ON CONFLICT (id) DO UPDATE SET 
+  public = false,
+  file_size_limit = 20971520;
+
+CREATE POLICY "Allow public insert receipts" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'receipts');
+CREATE POLICY "Allow admin read receipts" ON storage.objects FOR SELECT USING (bucket_id = 'receipts' AND auth.jwt() ->> 'email' IN (SELECT email FROM public.admin_users));
+CREATE POLICY "Allow admin delete receipts" ON storage.objects FOR DELETE USING (bucket_id = 'receipts' AND auth.jwt() ->> 'email' IN (SELECT email FROM public.admin_users));
+

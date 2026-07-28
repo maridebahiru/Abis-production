@@ -140,9 +140,9 @@ export default function AdminDashboardPage() {
       } else {
         alert('Video upload failed or returned an expired session. Please try again.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('BTS video file upload error', err);
-      alert('Failed to upload BTS video. Please check your network connection.');
+      alert(err?.message || 'Failed to upload BTS video. Please check your network connection and Supabase permissions.');
     } finally {
       setIsUploadingBtsVideo(false);
       setUploadProgressText('');
@@ -222,7 +222,7 @@ export default function AdminDashboardPage() {
   const [newBlockDate, setNewBlockDate] = useState<string>('');
   const [blockReason, setBlockReason] = useState<string>('Studio Maintenance');
 
-  // Load Initial Data
+  // Load Initial Data & auto-refetch on window focus
   useEffect(() => {
     if (!bookingStore.isAdminAuthenticated()) {
       router.push('/admin/login');
@@ -230,6 +230,14 @@ export default function AdminDashboardPage() {
     }
     setIsAuthenticated(true);
     refreshData();
+
+    const handleFocus = () => {
+      refreshData();
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+    };
   }, [router]);
 
   const refreshData = async () => {
@@ -725,52 +733,74 @@ export default function AdminDashboardPage() {
         {activeTab === 'bookings' && (
           <div className="space-y-6 animate-in fade-in duration-300">
             {/* Search & Filters Bar */}
-            <div className="glass-card p-6 rounded-2xl border border-zinc-800 grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="relative">
-                <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  placeholder="Search ref, customer name, phone..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 text-xs text-zinc-100 focus:border-gold-400 focus:outline-none"
-                />
+            <div className="glass-card p-6 rounded-2xl border border-zinc-800 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="relative">
+                  <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Search ref, customer name, phone..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-9 pr-4 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 text-xs text-zinc-100 focus:border-gold-400 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <select
+                    value={paymentFilter}
+                    onChange={(e) => setPaymentFilter(e.target.value)}
+                    className="w-full px-4 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 text-xs text-zinc-100 focus:border-gold-400 focus:outline-none"
+                  >
+                    <option value="All">All Payment Statuses</option>
+                    <option value="Pending Review">Pending Review</option>
+                    <option value="Verified">Verified</option>
+                    <option value="Rejected">Rejected</option>
+                  </select>
+                </div>
+
+                <div>
+                  <select
+                    value={serviceFilter}
+                    onChange={(e) => setServiceFilter(e.target.value)}
+                    className="w-full px-4 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 text-xs text-zinc-100 focus:border-gold-400 focus:outline-none"
+                  >
+                    <option value="All">All Services</option>
+                    {services.map((s) => (
+                      <option key={s.id} value={s.id}>{s.title}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <input
+                    type="date"
+                    value={dateFilter}
+                    onChange={(e) => setDateFilter(e.target.value)}
+                    className="w-full px-4 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 text-xs text-zinc-100 focus:border-gold-400 focus:outline-none"
+                  />
+                </div>
               </div>
 
-              <div>
-                <select
-                  value={paymentFilter}
-                  onChange={(e) => setPaymentFilter(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 text-xs text-zinc-100 focus:border-gold-400 focus:outline-none"
-                >
-                  <option value="All">All Payment Statuses</option>
-                  <option value="Pending Review">Pending Review</option>
-                  <option value="Verified">Verified</option>
-                  <option value="Rejected">Rejected</option>
-                </select>
-              </div>
-
-              <div>
-                <select
-                  value={serviceFilter}
-                  onChange={(e) => setServiceFilter(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 text-xs text-zinc-100 focus:border-gold-400 focus:outline-none"
-                >
-                  <option value="All">All Services</option>
-                  {services.map((s) => (
-                    <option key={s.id} value={s.id}>{s.title}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <input
-                  type="date"
-                  value={dateFilter}
-                  onChange={(e) => setDateFilter(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 text-xs text-zinc-100 focus:border-gold-400 focus:outline-none"
-                />
-              </div>
+              {(searchQuery !== '' || paymentFilter !== 'All' || serviceFilter !== 'All' || dateFilter !== '') && (
+                <div className="flex items-center justify-between pt-2 border-t border-zinc-800 text-xs">
+                  <span className="text-zinc-400 font-medium">
+                    Showing <strong className="text-gold-400">{filteredBookings.length}</strong> of <strong>{bookings.length}</strong> total bookings
+                  </span>
+                  <button
+                    onClick={() => {
+                      setSearchQuery('');
+                      setPaymentFilter('All');
+                      setServiceFilter('All');
+                      setDateFilter('');
+                    }}
+                    className="px-3 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>Clear All Filters</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Bookings Table */}

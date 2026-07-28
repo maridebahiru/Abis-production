@@ -2,6 +2,7 @@ import React from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Camera, Sparkles, Award, ShieldCheck, Film, Users, CheckCircle2 } from 'lucide-react';
+import abisCoverImg from '@/assets/abis-production-og-cover.png';
 
 export default function AboutPage() {
   return (
@@ -24,7 +25,7 @@ export default function AboutPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
         <div className="relative h-[480px] rounded-3xl overflow-hidden border border-gold-500/20 shadow-2xl">
           <Image
-            src="https://images.unsplash.com/photo-1520854221256-17451cc331bf?auto=format&fit=crop&q=80&w=1200"
+            src={abisCoverImg}
             alt="Abis Production Master Camera Team"
             fill
             sizes="(max-width: 1024px) 100vw, 50vw"

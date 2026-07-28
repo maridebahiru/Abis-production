@@ -186,7 +186,7 @@ function BookingContent() {
       
       if (receiptFile) {
         try {
-          const uploaded = await bookingStore.uploadMediaFile(receiptFile);
+          const uploaded = await bookingStore.uploadReceiptFile(receiptFile);
           if (uploaded) {
             finalReceiptUrl = uploaded;
           }
