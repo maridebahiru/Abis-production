@@ -40,7 +40,8 @@ import {
   Camera,
   MessageSquare,
   Send,
-  Layers
+  Layers,
+  RefreshCw
 } from 'lucide-react';
 import { 
   Booking, 
@@ -55,7 +56,8 @@ import {
   WebsiteSettings,
   ServiceCategory,
   AdminUser,
-  AdminUserRole
+  AdminUserRole,
+  AuditLog
 } from '@/types';
 import { bookingStore, INITIAL_WEBSITE_SETTINGS } from '@/lib/bookingStore';
 
@@ -70,6 +72,7 @@ type AdminTab =
   | 'payments'
   | 'calendar'
   | 'settings'
+  | 'audit_logs'
   | 'account';
 
 export default function AdminDashboardPage() {
@@ -87,15 +90,27 @@ export default function AdminDashboardPage() {
   const [portfolioItems, setPortfolioItems] = useState<PortfolioItem[]>([]);
   const [paymentSettings, setPaymentSettings] = useState<PaymentAccountDetails[]>([]);
   const [siteSettings, setSiteSettings] = useState<WebsiteSettings>(INITIAL_WEBSITE_SETTINGS);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+  const [isSavingPayments, setIsSavingPayments] = useState<boolean>(false);
+  const [paymentSaveSuccess, setPaymentSaveSuccess] = useState<string>('');
 
-  // Admin Users / Staff Access State
+  // Admin Users & RBAC State
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
+  const [currentUserRole, setCurrentUserRole] = useState<AdminUserRole>('super_admin');
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [adminUserModalOpen, setAdminUserModalOpen] = useState<boolean>(false);
   const [newAdminEmail, setNewAdminEmail] = useState<string>('');
   const [newAdminRole, setNewAdminRole] = useState<AdminUserRole>('admin');
   const [newAdminPassword, setNewAdminPassword] = useState<string>('AdminPassword123!');
   const [adminUserError, setAdminUserError] = useState<string>('');
   const [adminUserSuccess, setAdminUserSuccess] = useState<string>('');
+
+  // Re-authentication Modal State
+  const [reauthModalOpen, setReauthModalOpen] = useState<boolean>(false);
+  const [reauthPassword, setReauthPassword] = useState<string>('');
+  const [reauthError, setReauthError] = useState<string>('');
+  const [reauthPromptTitle, setReauthPromptTitle] = useState<string>('Re-authenticate Action');
+  const [pendingReauthAction, setPendingReauthAction] = useState<(() => Promise<void>) | null>(null);
 
   // Search & Filters
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -241,23 +256,64 @@ export default function AdminDashboardPage() {
   }, [router]);
 
   const refreshData = async () => {
-    const b = await bookingStore.getBookings();
-    const s = await bookingStore.getServices();
-    const p = await bookingStore.getPackages();
-    const bd = await bookingStore.getBlockedDates();
-    const port = await bookingStore.getPortfolioItems();
-    const pay = await bookingStore.getPaymentSettings();
-    const setts = await bookingStore.getWebsiteSettings();
-    const admins = await bookingStore.getAdminUsers();
+    setIsRefreshing(true);
+    try {
+      const b = await bookingStore.getBookings();
+      const s = await bookingStore.getServices();
+      const p = await bookingStore.getPackages();
+      const bd = await bookingStore.getBlockedDates();
+      const port = await bookingStore.getPortfolioItems();
+      const pay = await bookingStore.getPaymentSettings();
+      const setts = await bookingStore.getWebsiteSettings();
+      const admins = await bookingStore.getAdminUsers();
+      const logs = await bookingStore.getAuditLogs();
 
-    setBookings(b);
-    setServices(s);
-    setPackages(p);
-    setBlockedDates(bd);
-    setPortfolioItems(port);
-    setPaymentSettings(pay);
-    setSiteSettings(setts);
-    setAdminUsers(admins);
+      setBookings(b);
+      setServices(s);
+      setPackages(p);
+      setBlockedDates(bd);
+      setPortfolioItems(port);
+      setPaymentSettings(pay);
+      setSiteSettings(setts);
+      setAdminUsers(admins);
+      setAuditLogs(logs);
+
+      if (typeof window !== 'undefined') {
+        const savedEmail = localStorage.getItem('abis_admin_session_email') || 'admin@abisproduction.com';
+        const found = admins.find((a) => a.email.toLowerCase() === savedEmail.toLowerCase());
+        if (found) setCurrentUserRole(found.role);
+      }
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const requestReauth = (title: string, action: () => Promise<void>) => {
+    setReauthPromptTitle(title);
+    setReauthPassword('');
+    setReauthError('');
+    setPendingReauthAction(() => action);
+    setReauthModalOpen(true);
+  };
+
+  const handleReauthConfirm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setReauthError('');
+    if (!reauthPassword || reauthPassword.length < 6) {
+      setReauthError('Please enter your admin password to re-authenticate (min 6 characters).');
+      return;
+    }
+
+    if (pendingReauthAction) {
+      try {
+        await pendingReauthAction();
+        setReauthModalOpen(false);
+        setReauthPassword('');
+        setPendingReauthAction(null);
+      } catch (err: any) {
+        setReauthError(err?.message || 'Re-authentication failed.');
+      }
+    }
   };
 
   const handleAddAdminUser = async (e: React.FormEvent) => {
@@ -281,14 +337,27 @@ export default function AdminDashboardPage() {
   };
 
   const handleDeleteAdminUser = async (id: string, email: string) => {
-    if (!confirm(`Are you sure you want to revoke access for ${email}?`)) return;
-    await bookingStore.deleteAdminUser(id);
-    refreshData();
+    if (currentUserRole !== 'super_admin') {
+      alert('Only Super Admin users are authorized to revoke admin access.');
+      return;
+    }
+    requestReauth(`Revoke Access for ${email}`, async () => {
+      await bookingStore.deleteAdminUser(id);
+      await bookingStore.createAuditLog('REVOKE_ADMIN_ACCESS', 'admin_users', id, { revokedEmail: email });
+      refreshData();
+    });
   };
 
   const handleChangeAdminRole = async (id: string, role: AdminUserRole) => {
-    await bookingStore.updateAdminUserRole(id, role);
-    refreshData();
+    if (currentUserRole !== 'super_admin') {
+      alert('Only Super Admin users are authorized to change admin user roles.');
+      return;
+    }
+    requestReauth(`Change Admin Role to ${role}`, async () => {
+      await bookingStore.updateAdminUserRole(id, role);
+      await bookingStore.createAuditLog('UPDATE_ADMIN_ROLE', 'admin_users', id, { targetId: id, newRole: role });
+      refreshData();
+    });
   };
 
   const handleLogout = async () => {
@@ -515,6 +584,20 @@ export default function AdminDashboardPage() {
     refreshData();
   };
 
+  const handleSaveAllPaymentSettings = async () => {
+    setIsSavingPayments(true);
+    setPaymentSaveSuccess('');
+    try {
+      await bookingStore.saveAllPaymentSettings(paymentSettings);
+      setPaymentSaveSuccess('Payment account configurations saved and synchronized with live public site & database successfully!');
+      setTimeout(() => setPaymentSaveSuccess(''), 5000);
+    } catch (err) {
+      alert('Failed to save payment settings.');
+    } finally {
+      setIsSavingPayments(false);
+    }
+  };
+
   // --- WEBSITE SETTINGS HANDLER ---
   const handleSaveWebsiteSettings = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -538,6 +621,15 @@ export default function AdminDashboardPage() {
         bookingStatus: bookStatus,
       });
     }
+  };
+
+  const handleDeleteBooking = async (bookingId: string) => {
+    if (!confirm('Are you sure you want to permanently delete this booking? This will remove it from both Supabase database and local storage.')) return;
+    await bookingStore.deleteBooking(bookingId);
+    if (selectedBooking && (selectedBooking.id === bookingId || selectedBooking.referenceNumber === bookingId)) {
+      setSelectedBooking(null);
+    }
+    refreshData();
   };
 
   const handleToggleBlockDate = async (e: React.FormEvent) => {
@@ -599,12 +691,15 @@ export default function AdminDashboardPage() {
             { id: 'services', label: 'Services', icon: Sparkles },
             { id: 'packages', label: 'Packages', icon: PackageIcon },
             { id: 'customers', label: 'Customers', icon: Users },
-            { id: 'admin_users', label: 'Admin & Staff Users', icon: ShieldCheck },
-            { id: 'payments', label: 'Payments', icon: CreditCard },
+            { id: 'admin_users', label: 'Admin & Staff Users', icon: ShieldCheck, roles: ['super_admin'] },
+            { id: 'payments', label: 'Payments', icon: CreditCard, roles: ['super_admin'] },
             { id: 'calendar', label: 'Calendar', icon: CalendarIcon },
-            { id: 'settings', label: 'Website Settings', icon: Globe },
+            { id: 'settings', label: 'Website Settings', icon: Globe, roles: ['super_admin', 'admin'] },
+            { id: 'audit_logs', label: 'Audit Logs', icon: Lock, roles: ['super_admin'] },
             { id: 'account', label: 'Account', icon: UserCheck },
-          ].map((tab) => {
+          ]
+            .filter((tab) => !tab.roles || tab.roles.includes(currentUserRole))
+            .map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
             return (
@@ -883,12 +978,21 @@ export default function AdminDashboardPage() {
                           </td>
 
                           <td className="p-4 text-right">
-                            <button
-                              onClick={() => setSelectedBooking(b)}
-                              className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-200"
-                            >
-                              Review
-                            </button>
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={() => setSelectedBooking(b)}
+                                className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-200"
+                              >
+                                Review
+                              </button>
+                              <button
+                                onClick={() => handleDeleteBooking(b.referenceNumber || b.id)}
+                                className="px-2.5 py-1.5 rounded-lg bg-red-950/60 hover:bg-red-900/80 border border-red-500/30 text-xs font-semibold text-red-300 transition-colors"
+                                title="Permanently Delete Booking"
+                              >
+                                Delete
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))
@@ -1144,15 +1248,55 @@ export default function AdminDashboardPage() {
         {/* TAB 7: PAYMENT SETTINGS */}
         {activeTab === 'payments' && (
           <div className="space-y-6 animate-in fade-in duration-300">
-            <div>
-              <h2 className="font-serif text-2xl font-bold text-zinc-100">Payment Account Settings</h2>
-              <p className="text-xs text-zinc-400">Configure Telebirr, CBE Birr, and Bank Transfer accounts without touching code.</p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-800 pb-4">
+              <div>
+                <h2 className="font-serif text-2xl font-bold text-zinc-100">Payment Account Settings</h2>
+                <p className="text-xs text-zinc-400 mt-1">Configure Telebirr, CBE Birr, and Bank Transfer accounts without touching code.</p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={refreshData}
+                  disabled={isRefreshing}
+                  className="px-4 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-xs font-semibold text-zinc-300 hover:text-white hover:border-zinc-700 flex items-center gap-2 transition-all"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-gold-400' : ''}`} />
+                  <span>{isRefreshing ? 'Syncing...' : 'Refresh Data'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSaveAllPaymentSettings}
+                  disabled={isSavingPayments}
+                  className="gold-btn px-5 py-2 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center gap-2 shadow-gold-sm"
+                >
+                  {isSavingPayments ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Check className="w-3.5 h-3.5" />
+                  )}
+                  <span>{isSavingPayments ? 'Saving...' : 'Save Configuration'}</span>
+                </button>
+              </div>
             </div>
 
+            {paymentSaveSuccess && (
+              <div className="p-4 rounded-xl bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 text-xs flex items-center gap-2.5 animate-in fade-in">
+                <CheckCircle2 className="w-4.5 h-4.5 text-emerald-400 flex-shrink-0" />
+                <span className="font-medium">{paymentSaveSuccess}</span>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {paymentSettings.map((pm) => (
+              {paymentSettings.map((pm, index) => (
                 <div key={pm.method} className="glass-card p-6 rounded-2xl border border-zinc-800 space-y-4">
-                  <h3 className="font-serif text-xl font-bold text-gold-gradient">{pm.method} Configuration</h3>
+                  <div className="flex items-center justify-between border-b border-zinc-800/80 pb-3">
+                    <h3 className="font-serif text-xl font-bold text-gold-gradient">{pm.method} Configuration</h3>
+                    <span className="text-[10px] uppercase font-bold px-2.5 py-1 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-400">
+                      Active Account
+                    </span>
+                  </div>
 
                   <div className="space-y-3 text-xs">
                     <div className="space-y-1">
@@ -1160,8 +1304,13 @@ export default function AdminDashboardPage() {
                       <input
                         type="text"
                         value={pm.accountName}
-                        onChange={(e) => handleSavePaymentSetting({ ...pm, accountName: e.target.value })}
-                        className="w-full px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-700 text-zinc-100 focus:border-gold-400 focus:outline-none"
+                        onChange={(e) => {
+                          const updated = [...paymentSettings];
+                          updated[index] = { ...updated[index], accountName: e.target.value };
+                          setPaymentSettings(updated);
+                        }}
+                        placeholder="e.g. ABIS PRODUCTION PLC"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 text-zinc-100 focus:border-gold-400 focus:outline-none transition-colors"
                       />
                     </div>
 
@@ -1170,8 +1319,13 @@ export default function AdminDashboardPage() {
                       <input
                         type="text"
                         value={pm.accountNumber}
-                        onChange={(e) => handleSavePaymentSetting({ ...pm, accountNumber: e.target.value })}
-                        className="w-full px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-700 text-zinc-100 focus:border-gold-400 focus:outline-none font-mono"
+                        onChange={(e) => {
+                          const updated = [...paymentSettings];
+                          updated[index] = { ...updated[index], accountNumber: e.target.value };
+                          setPaymentSettings(updated);
+                        }}
+                        placeholder="e.g. 1000 4829 1948 2"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 text-zinc-100 focus:border-gold-400 focus:outline-none font-mono transition-colors"
                       />
                     </div>
 
@@ -1180,8 +1334,13 @@ export default function AdminDashboardPage() {
                       <textarea
                         rows={3}
                         value={pm.instructions}
-                        onChange={(e) => handleSavePaymentSetting({ ...pm, instructions: e.target.value })}
-                        className="w-full px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-700 text-zinc-100 focus:border-gold-400 focus:outline-none"
+                        onChange={(e) => {
+                          const updated = [...paymentSettings];
+                          updated[index] = { ...updated[index], instructions: e.target.value };
+                          setPaymentSettings(updated);
+                        }}
+                        placeholder="Enter step-by-step transfer instructions..."
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 text-zinc-100 focus:border-gold-400 focus:outline-none transition-colors leading-relaxed"
                       />
                     </div>
                   </div>
@@ -1360,6 +1519,69 @@ export default function AdminDashboardPage() {
               </div>
             </div>
           </form>
+        )}
+
+        {/* TAB 10: AUDIT LOGS (SUPER ADMIN ONLY) */}
+        {activeTab === 'audit_logs' && (
+          <div className="space-y-6 animate-in fade-in duration-300">
+            <div className="glass-card p-6 sm:p-8 rounded-3xl border border-gold-500/20 shadow-xl">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gold-500/10 border border-gold-500/30 text-gold-400 text-[10px] font-bold uppercase tracking-widest mb-2">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Security Audit Trail</span>
+              </div>
+              <h2 className="font-serif text-2xl font-bold text-zinc-100">
+                System Audit & Security Event Logs ({auditLogs.length})
+              </h2>
+              <p className="text-xs text-zinc-400 mt-1">
+                Super Admin audit trail recording administrative actions, payment updates, user management, and security events.
+              </p>
+            </div>
+
+            <div className="glass-card rounded-3xl border border-zinc-800 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-zinc-900/80 text-zinc-400 font-semibold uppercase tracking-wider border-b border-zinc-800">
+                    <tr>
+                      <th className="p-4">Timestamp</th>
+                      <th className="p-4">Admin Actor</th>
+                      <th className="p-4">Action</th>
+                      <th className="p-4">Target Resource</th>
+                      <th className="p-4">Details</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800/60 text-zinc-300">
+                    {auditLogs.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="p-8 text-center text-zinc-500">
+                          No audit logs recorded yet.
+                        </td>
+                      </tr>
+                    ) : (
+                      auditLogs.map((log) => (
+                        <tr key={log.id} className="hover:bg-zinc-900/50 transition-colors">
+                          <td className="p-4 font-mono text-zinc-400 text-[11px]">
+                            {new Date(log.createdAt).toLocaleString()}
+                          </td>
+                          <td className="p-4 font-semibold text-zinc-100">{log.actorEmail}</td>
+                          <td className="p-4">
+                            <span className="px-2.5 py-1 rounded-md bg-gold-500/15 border border-gold-500/30 text-gold-400 text-[10px] font-bold uppercase font-mono">
+                              {log.action}
+                            </span>
+                          </td>
+                          <td className="p-4 font-mono text-zinc-300">
+                            {log.targetTable} {log.targetId ? `(${log.targetId})` : ''}
+                          </td>
+                          <td className="p-4 font-mono text-[10px] text-zinc-400 max-w-xs truncate">
+                            {JSON.stringify(log.details)}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* TAB 9: ADMIN & STAFF USER MANAGEMENT (SUPER ADMIN) */}
@@ -2016,6 +2238,68 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
+      {/* RE-AUTHENTICATION PROMPT MODAL */}
+      {reauthModalOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in">
+          <div className="glass-card max-w-md w-full p-6 sm:p-8 rounded-3xl border border-gold-500/30 space-y-6 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-gold-500/20 border border-gold-500/40 flex items-center justify-center text-gold-400">
+                  <Lock className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-serif text-lg font-bold text-zinc-100">{reauthPromptTitle}</h3>
+                  <span className="text-[10px] text-gold-400 font-semibold uppercase tracking-wider">Security Re-authentication Required</span>
+                </div>
+              </div>
+              <button onClick={() => setReauthModalOpen(false)} className="text-zinc-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleReauthConfirm} className="space-y-4 text-xs">
+              <p className="text-zinc-300 leading-relaxed">
+                Please re-enter your admin account password to authorize this privileged modification.
+              </p>
+
+              <div className="space-y-1">
+                <label className="text-zinc-400 font-semibold block">Admin Password</label>
+                <input
+                  type="password"
+                  placeholder="Enter your password..."
+                  value={reauthPassword}
+                  onChange={(e) => setReauthPassword(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl bg-zinc-900 border border-zinc-700 text-zinc-100 focus:border-gold-400 focus:outline-none"
+                  autoFocus
+                />
+              </div>
+
+              {reauthError && (
+                <div className="p-3 rounded-xl bg-red-950/80 border border-red-500/40 text-red-300 text-xs font-semibold">
+                  {reauthError}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setReauthModalOpen(false)}
+                  className="px-5 py-2.5 rounded-xl bg-zinc-900 text-zinc-300 hover:text-white font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="gold-btn px-6 py-2.5 rounded-xl font-bold uppercase tracking-wider shadow-gold-sm"
+                >
+                  Confirm & Authorize
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* --- RECEIPT & PHOTO MANAGEMENT MODAL --- */}
       {selectedBooking && (
         <AdminBookingReviewModal
@@ -2073,10 +2357,11 @@ function AdminBookingReviewModal({
 
       const existing = selectedBooking.galleryPhotos || [];
       const combined = [...existing, ...newItems];
-      const updated = await bookingStore.uploadOrderShotPhotos(selectedBooking.id, combined);
+      const targetId = selectedBooking.referenceNumber || selectedBooking.id;
+      const updated = await bookingStore.uploadOrderShotPhotos(targetId, combined);
       if (updated) {
         onPhotosUpdated(updated);
-        alert(`Successfully uploaded ${newItems.length} photos! Order status changed to "Photos Uploaded" and customer notified.`);
+        alert(`Successfully uploaded ${newItems.length} photo(s)! Order status changed to "Photos Uploaded".`);
       }
     } catch (err) {
       console.error('Error uploading shot photos', err);

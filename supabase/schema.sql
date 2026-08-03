@@ -122,6 +122,17 @@ CREATE TABLE IF NOT EXISTS public.admin_users (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
 );
 
+-- 9. Audit Logs Table
+CREATE TABLE IF NOT EXISTS public.audit_logs (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  actor_email VARCHAR(150) NOT NULL,
+  action VARCHAR(100) NOT NULL,
+  target_table VARCHAR(100),
+  target_id VARCHAR(100),
+  details JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
 -- Seed default admin user record
 INSERT INTO public.admin_users (email, role)
 VALUES ('admin@luxphotography.com', 'admin')

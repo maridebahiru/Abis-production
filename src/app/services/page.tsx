@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import Image from 'next/image';
 import Link from 'next/link';
 import { 
   Sparkles, 
@@ -14,18 +13,22 @@ import {
 import { Service, Package } from '@/types';
 import { bookingStore } from '@/lib/bookingStore';
 import { getServiceCoverImage } from '@/lib/mockData';
+import OptimizedImage from '@/components/OptimizedImage';
 
 export default function ServicesPage() {
   const [services, setServices] = useState<Service[]>([]);
   const [packages, setPackages] = useState<Package[]>([]);
   const [activeServiceModal, setActiveServiceModal] = useState<Service | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
   useEffect(() => {
     async function loadData() {
+      setIsLoading(true);
       const s = await bookingStore.getServices();
       const p = await bookingStore.getPackages();
       setServices(s.filter((serv) => serv.isEnabled !== false));
       setPackages(p);
+      setIsLoading(false);
     }
     loadData();
   }, []);
@@ -67,22 +70,30 @@ export default function ServicesPage() {
 
       {/* Services Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-        {services.map((service) => {
-          const servicePkgs = getServicePackages(service);
-          return (
-            <div
-              key={service.id}
-              className="glass-card glass-card-hover rounded-3xl overflow-hidden flex flex-col justify-between border border-gold-500/15"
-            >
-              {/* Cover Image */}
-              <div className="relative h-64 w-full overflow-hidden">
-                <Image
-                  src={getServiceCoverImage(service)}
-                  alt={service.title}
-                  fill
-                  sizes="(max-width: 768px) 100vw, 33vw"
-                  className="object-cover hover:scale-105 transition-transform duration-700"
-                />
+        {isLoading
+          ? Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="glass-card rounded-3xl h-[420px] p-6 space-y-6 border border-zinc-800 animate-pulse">
+                <div className="h-64 rounded-2xl bg-gradient-to-r from-zinc-900 via-zinc-800 to-zinc-900 bg-[length:200%_100%] animate-shimmer" />
+                <div className="h-5 w-3/4 bg-zinc-800 rounded" />
+                <div className="h-4 w-1/2 bg-zinc-800 rounded" />
+              </div>
+            ))
+          : services.map((service) => {
+              const servicePkgs = getServicePackages(service);
+              return (
+                <div
+                  key={service.id}
+                  className="glass-card glass-card-hover rounded-3xl overflow-hidden flex flex-col justify-between border border-gold-500/15"
+                >
+                  {/* Cover Image */}
+                  <div className="relative h-64 w-full overflow-hidden">
+                    <OptimizedImage
+                      src={getServiceCoverImage(service)}
+                      alt={service.title}
+                      fill
+                      sizes="(max-width: 768px) 100vw, 33vw"
+                      className="object-cover hover:scale-105 transition-transform duration-700"
+                    />
                 <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/40 to-transparent" />
 
                 <div className="absolute top-4 left-4">

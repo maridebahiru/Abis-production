@@ -41,7 +41,7 @@ export const SERVICE_ASSET_MAP: Record<string, string> = {
 };
 
 export function getServiceCoverImage(service: { id?: string; title?: string; category?: string; coverImage?: string }): string {
-  if (service.coverImage && (service.coverImage.startsWith('data:') || service.coverImage.startsWith('http') || service.coverImage.startsWith('/_next'))) {
+  if (service.coverImage && (service.coverImage.startsWith('data:') || service.coverImage.startsWith('http') || service.coverImage.startsWith('/'))) {
     return service.coverImage;
   }
   const idKey = (service.id || '').toLowerCase();
@@ -391,78 +391,4 @@ export const PORTFOLIO_ITEMS: PortfolioItem[] = [
   },
 ];
 
-export const INITIAL_BOOKINGS: Booking[] = [
-  {
-    id: 'book-101',
-    referenceNumber: 'PS-2026-884920',
-    serviceId: 'serg',
-    serviceName: 'Wedding Photography & Cinema',
-    packageName: 'Gold Royal Wedding Package',
-    bookingDate: '2026-08-18',
-    bookingTime: '10:00 AM',
-    totalPrice: 55000,
-    customerName: 'Abebe Bekele',
-    customerPhone: '+251 911 889 900',
-    customerEmail: 'abebe.b@example.com',
-    eventAddress: 'Sheraton Addis Hotel, Addis Ababa',
-    eventType: 'Wedding Ceremony',
-    numberOfGuests: 350,
-    additionalNotes: 'Please pay extra attention to capturing the parents during the traditional coffee ceremony.',
-    paymentMethod: 'Telebirr',
-    amountPaid: 55000,
-    transactionId: 'TEL-99482104',
-    receiptUrl: 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&q=80&w=800',
-    receiptFileName: 'telebirr_receipt_0012.jpg',
-    receiptFileType: 'image/jpeg',
-    paymentStatus: 'Verified',
-    bookingStatus: 'Photos Uploaded',
-    galleryPin: '8849',
-    maxSelectionCount: 25,
-    galleryPhotos: [
-      {
-        id: 'gp-1',
-        title: 'Bride & Groom Portrait 01',
-        url: 'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&q=80&w=1200',
-        highResUrl: 'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&q=80&w=2400',
-        status: 'Pending',
-      },
-      {
-        id: 'gp-2',
-        title: 'Ceremony Ring Exchange 02',
-        url: 'https://images.unsplash.com/photo-1511285560929-80b456fea0bc?auto=format&fit=crop&q=80&w=1200',
-        highResUrl: 'https://images.unsplash.com/photo-1511285560929-80b456fea0bc?auto=format&fit=crop&q=80&w=2400',
-        status: 'Pending',
-      },
-    ],
-    createdAt: '2026-07-21T08:30:00Z',
-  },
-  {
-    id: 'book-102',
-    referenceNumber: 'PS-2026-449102',
-    serviceId: 'ledet',
-    serviceName: 'Birthday Celebration',
-    packageName: 'VIP Birthday & Video Package',
-    bookingDate: '2026-08-25',
-    bookingTime: '02:00 PM',
-    totalPrice: 25000,
-    customerName: 'Saba Tadesse',
-    customerPhone: '+251 922 334 455',
-    customerEmail: 'saba.tadesse@example.com',
-    eventAddress: 'Bole Atlas, Addis Ababa',
-    eventType: 'Birthday Party',
-    numberOfGuests: 80,
-    additionalNotes: 'Need 4K video reel for Instagram.',
-    paymentMethod: 'CBE Birr',
-    amountPaid: 25000,
-    transactionId: 'CBE-3940192',
-    receiptUrl: 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&q=80&w=800',
-    receiptFileName: 'cbe_receipt_449102.pdf',
-    receiptFileType: 'application/pdf',
-    paymentStatus: 'Pending Review',
-    bookingStatus: 'Pending Payment Verification',
-    galleryPin: '4491',
-    maxSelectionCount: 30,
-    galleryPhotos: [],
-    createdAt: '2026-07-22T14:15:00Z',
-  },
-];
+export const INITIAL_BOOKINGS: Booking[] = [];

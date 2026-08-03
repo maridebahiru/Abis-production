@@ -39,15 +39,22 @@ export async function middleware(request: NextRequest) {
       }
     );
 
-    // Get current user session from Supabase Auth
-    const { data: { user } } = await supabase.auth.getUser();
-
-    // Check custom cookie fallback if user cookie exists
+    // Check custom cookie fallback first for instant local authorization
     const adminTokenCookie = request.cookies.get('abis_admin_token')?.value;
+    if (adminTokenCookie === 'authenticated') {
+      return supabaseResponse;
+    }
 
-    const isAuthorized = Boolean(user || adminTokenCookie === 'authenticated');
+    // Get current user session from Supabase Auth
+    let user = null;
+    try {
+      const authRes = await supabase.auth.getUser();
+      user = authRes.data?.user || null;
+    } catch (e) {
+      // Ignore auth errors or network timeouts
+    }
 
-    if (!isAuthorized) {
+    if (!user) {
       const url = request.nextUrl.clone();
       url.pathname = '/admin/login';
       url.searchParams.set('redirect', pathname);

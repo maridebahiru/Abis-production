@@ -10,7 +10,8 @@ import {
   PaymentAccountDetails,
   WebsiteSettings,
   AdminUser,
-  AdminUserRole
+  AdminUserRole,
+  AuditLog
 } from '@/types';
 import { 
   INITIAL_SERVICES, 
@@ -21,6 +22,8 @@ import {
 } from './mockData';
 import { isSupabaseConfigured, supabase } from './supabase';
 import { getIDBData, setIDBData, compressImage } from './idbStore';
+import { sanitizeText } from './sanitizer';
+import { checkRateLimit, recordFailedAttempt, resetRateLimit } from './rateLimiter';
 
 import heroHeroImg from '@/assets/Wedding Photography/0A3A4136.JPG';
 
@@ -40,7 +43,7 @@ export const INITIAL_ADMIN_USERS: AdminUser[] = [
 ];
 
 const STORAGE_KEYS = {
-  BOOKINGS: 'abis_photo_bookings_v3',
+  BOOKINGS: 'abis_photo_bookings_v5',
   SERVICES: 'abis_photo_services_v4',
   PACKAGES: 'abis_photo_packages_v3',
   BLOCKED_DATES: 'abis_photo_blocked_dates_v3',
@@ -53,6 +56,33 @@ const STORAGE_KEYS = {
 
 // Flags to silently fallback to IndexedDB if remote Supabase buckets don't exist yet
 let supabaseStorageDisabled = false;
+
+// Silently flag if remote audit_logs table is missing to prevent repeated 404 console logs
+let isAuditLogsDisabled = false;
+
+function isUUID(str: string): boolean {
+  if (!str) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str.trim());
+}
+
+function applyBookingFilter(query: any, idVal: string, refVal?: string) {
+  const cleanId = (idVal || '').trim();
+  const cleanRef = (refVal || '').trim();
+
+  if (isUUID(cleanId)) {
+    if (cleanRef) {
+      return query.or(`id.eq.${cleanId},reference_number.eq.${cleanRef}`);
+    }
+    return query.or(`id.eq.${cleanId},reference_number.eq.${cleanId}`);
+  }
+
+  if (cleanRef && isUUID(cleanRef)) {
+    return query.or(`id.eq.${cleanRef},reference_number.eq.${cleanId}`);
+  }
+
+  const targetRef = cleanRef || cleanId;
+  return query.eq('reference_number', targetRef);
+}
 
 export const INITIAL_WEBSITE_SETTINGS: WebsiteSettings = {
   heroTitle: "Immortalizing Life's Moments With Elegance & Masterful Quality",
@@ -379,22 +409,26 @@ export const bookingStore = {
         const fileName = `media_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
         const filePath = `uploads/${fileName}`;
 
-        const { data, error } = await supabase.storage
+        const uploadPromise = supabase.storage
           .from('portfolio')
           .upload(filePath, file, { upsert: true, contentType: file.type });
+        const timeoutPromise = new Promise<any>((_, reject) =>
+          setTimeout(() => reject(new Error('Storage upload timeout')), 5000)
+        );
 
-        if (!error && data) {
+        const res = (await Promise.race([uploadPromise, timeoutPromise])) as any;
+        if (res?.data && !res?.error) {
           const { data: publicUrlData } = supabase.storage
             .from('portfolio')
             .getPublicUrl(filePath);
           if (publicUrlData?.publicUrl) {
             return publicUrlData.publicUrl;
           }
-        } else if (error) {
-          console.warn('Supabase storage image upload warning:', error);
+        } else if (res?.error) {
+          console.warn('Supabase storage image upload warning:', res.error);
         }
       } catch (e) {
-        console.warn('Image upload exception:', e);
+        console.warn('Image upload exception/timeout, using local compressed dataURL:', e);
       }
     }
 
@@ -561,17 +595,32 @@ export const bookingStore = {
 
   // --- PAYMENT SETTINGS CRUD ---
   async getPaymentSettings(): Promise<PaymentAccountDetails[]> {
+    let supabaseSettings: PaymentAccountDetails[] = [];
     if (isSupabaseConfigured && supabase) {
       try {
         const { data, error } = await supabase.from('payment_settings').select('*');
         if (!error && data && data.length > 0) {
-          return data as PaymentAccountDetails[];
+          supabaseSettings = data.map((row: any) => ({
+            method: row.method || 'Telebirr',
+            accountName: row.account_name ?? row.accountName ?? '',
+            accountNumber: row.account_number ?? row.accountNumber ?? '',
+            instructions: row.instructions ?? '',
+            qrCodeUrl: row.qr_code_url ?? row.qrCodeUrl ?? '',
+            color: row.color ?? 'from-gold-500 to-amber-600',
+          }));
         }
       } catch (e) {
         console.warn('getPaymentSettings exception', e);
       }
     }
-    return getStoredData<PaymentAccountDetails[]>(STORAGE_KEYS.PAYMENTS, PAYMENT_METHODS);
+    const localSettings = await getStoredData<PaymentAccountDetails[]>(STORAGE_KEYS.PAYMENTS, PAYMENT_METHODS);
+    if (supabaseSettings.length > 0) {
+      const mergedMap = new Map<string, PaymentAccountDetails>();
+      localSettings.forEach((p) => mergedMap.set(p.method, p));
+      supabaseSettings.forEach((p) => mergedMap.set(p.method, p));
+      return Array.from(mergedMap.values());
+    }
+    return localSettings;
   },
 
   async savePaymentSetting(setting: PaymentAccountDetails): Promise<PaymentAccountDetails> {
@@ -588,12 +637,41 @@ export const bookingStore = {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        await supabase.from('payment_settings').upsert([setting]);
+        const dbRow = {
+          method: setting.method,
+          account_name: setting.accountName,
+          account_number: setting.accountNumber,
+          instructions: setting.instructions,
+          qr_code_url: setting.qrCodeUrl || '',
+          color: setting.color || 'from-gold-500 to-amber-600',
+        };
+        await supabase.from('payment_settings').upsert([dbRow], { onConflict: 'method' });
       } catch (e) {
-        // Silently handled
+        console.warn('savePaymentSetting error:', e);
       }
     }
     return setting;
+  },
+
+  async saveAllPaymentSettings(settings: PaymentAccountDetails[]): Promise<PaymentAccountDetails[]> {
+    await setStoredData(STORAGE_KEYS.PAYMENTS, settings);
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const dbRows = settings.map((s) => ({
+          method: s.method,
+          account_name: s.accountName,
+          account_number: s.accountNumber,
+          instructions: s.instructions,
+          qr_code_url: s.qrCodeUrl || '',
+          color: s.color || 'from-gold-500 to-amber-600',
+        }));
+        await supabase.from('payment_settings').upsert(dbRows, { onConflict: 'method' });
+      } catch (e) {
+        console.warn('saveAllPaymentSettings error:', e);
+      }
+    }
+    return settings;
   },
 
   // --- WEBSITE CONTENT SETTINGS CRUD ---
@@ -630,40 +708,86 @@ export const bookingStore = {
   // --- BOOKINGS & RECEIPTS CRUD ---
   async getBookings(): Promise<Booking[]> {
     let supabaseBookings: Booking[] = [];
+    let isSupabaseLoaded = false;
     if (isSupabaseConfigured && supabase) {
       try {
-        const { data, error } = await supabase
+        const fetchPromise = supabase
           .from('bookings')
           .select('*')
           .order('created_at', { ascending: false });
-        if (error) {
-          console.warn('Supabase getBookings error:', error.message);
-        } else if (data) {
-          supabaseBookings = data.map(mapSupabaseBookingToBooking);
+        const timeoutPromise = new Promise<any>((_, reject) =>
+          setTimeout(() => reject(new Error('Supabase getBookings timeout')), 4000)
+        );
+        const res = (await Promise.race([fetchPromise, timeoutPromise])) as any;
+        if (res?.data && !res.error) {
+          supabaseBookings = res.data.map(mapSupabaseBookingToBooking);
+          isSupabaseLoaded = true;
+        } else if (res?.error) {
+          console.warn('Supabase getBookings notice:', res.error.message);
         }
       } catch (e) {
-        console.warn('Supabase getBookings exception:', e);
+        console.warn('Supabase getBookings timeout/exception, using local storage:', e);
       }
     }
     const localBookings = await getStoredData<Booking[]>(STORAGE_KEYS.BOOKINGS, INITIAL_BOOKINGS);
+    const deletedIds = await getStoredData<string[]>('abis_deleted_booking_ids', ['ps-2026-884920', 'ps-2026-449102', 'book-101', 'book-102']);
+    const deletedSet = new Set(deletedIds.map((id) => id.toLowerCase()));
 
-    const combinedMap = new Map<string, Booking>();
-    supabaseBookings.forEach((b) => {
-      const key = (b.referenceNumber || b.id).toLowerCase();
-      combinedMap.set(key, b);
+    // Filter out locally deleted IDs
+    const validLocalBookings = localBookings.filter((b) => {
+      const idKey = (b.id || '').toLowerCase();
+      const refKey = (b.referenceNumber || '').toLowerCase();
+      return !deletedSet.has(idKey) && !deletedSet.has(refKey);
     });
 
-    localBookings.forEach((b) => {
+    const combinedMap = new Map<string, Booking>();
+
+    // Populated from Supabase DB
+    supabaseBookings.forEach((b) => {
       const key = (b.referenceNumber || b.id).toLowerCase();
+      if (!deletedSet.has(key)) {
+        combinedMap.set(key, b);
+      }
+    });
+
+    // If Supabase returned a valid query response, purge local cache of bookings deleted directly from DB
+    if (isSupabaseLoaded) {
+      const supabaseKeys = new Set(
+        supabaseBookings.map((b) => (b.referenceNumber || b.id).toLowerCase())
+      );
+
+      const activeLocal = validLocalBookings.filter((b) => {
+        const key = (b.referenceNumber || b.id || '').toLowerCase();
+        if (supabaseKeys.has(key)) return true;
+        // Keep offline/recent local bookings (created within last 10 minutes)
+        const ageMs = Date.now() - new Date(b.createdAt || 0).getTime();
+        return ageMs < 10 * 60 * 1000;
+      });
+
+      await setStoredData(STORAGE_KEYS.BOOKINGS, activeLocal);
+    }
+
+    validLocalBookings.forEach((b) => {
+      const key = (b.referenceNumber || b.id || '').toLowerCase();
+      if (!key || deletedSet.has(key)) return;
       const existing = combinedMap.get(key);
       if (!existing) {
         combinedMap.set(key, b);
       } else {
-        if (b.galleryPhotos && b.galleryPhotos.length > 0 && (!existing.galleryPhotos || existing.galleryPhotos.length === 0)) {
-          existing.galleryPhotos = b.galleryPhotos;
+        if (b.paymentStatus && b.paymentStatus !== 'Pending Review') {
+          existing.paymentStatus = b.paymentStatus;
         }
         if (b.bookingStatus && b.bookingStatus !== 'Pending Payment Verification') {
           existing.bookingStatus = b.bookingStatus;
+        }
+        if (b.galleryPhotos && b.galleryPhotos.length > 0) {
+          existing.galleryPhotos = b.galleryPhotos;
+        }
+        if (b.galleryPin) {
+          existing.galleryPin = b.galleryPin;
+        }
+        if (b.amountPaid && b.amountPaid > 0) {
+          existing.amountPaid = b.amountPaid;
         }
       }
     });
@@ -682,6 +806,12 @@ export const bookingStore = {
 
     const newBooking: Booking = {
       ...bookingData,
+      customerName: sanitizeText(bookingData.customerName),
+      customerPhone: sanitizeText(bookingData.customerPhone),
+      customerEmail: sanitizeText(bookingData.customerEmail),
+      eventAddress: sanitizeText(bookingData.eventAddress),
+      eventType: sanitizeText(bookingData.eventType),
+      additionalNotes: sanitizeText(bookingData.additionalNotes || ''),
       receiptUrl,
       id: `book-${Date.now()}`,
       referenceNumber,
@@ -732,31 +862,116 @@ export const bookingStore = {
   },
 
   async lookupBooking(referenceNumber: string, email: string): Promise<Booking | null> {
-    const cleanRef = referenceNumber.trim().toUpperCase();
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanRef = sanitizeText(referenceNumber).toUpperCase();
+    const cleanEmail = sanitizeText(email).toLowerCase();
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data, error } = await supabase.rpc('lookup_client_booking', {
+          p_ref_number: cleanRef,
+          p_email: cleanEmail,
+        });
+        if (!error && data && data.length > 0) {
+          return mapSupabaseBookingToBooking(data[0]);
+        }
+      } catch (e) {
+        console.warn('lookupBooking RPC exception', e);
+      }
+    }
 
     const allBookings = await this.getBookings();
     const found = allBookings.find(
       (b) =>
-        b.referenceNumber.toUpperCase() === cleanRef &&
-        b.customerEmail.toLowerCase() === cleanEmail
+        ((b.referenceNumber && b.referenceNumber.toUpperCase() === cleanRef) ||
+         (b.id && b.id.toUpperCase() === cleanRef)) &&
+        b.customerEmail && b.customerEmail.toLowerCase() === cleanEmail
     );
 
     return found || null;
   },
 
   async lookupClientGallery(referenceNumber: string, pin: string): Promise<Booking | null> {
-    const cleanRef = referenceNumber.trim().toUpperCase();
-    const cleanPin = pin.trim();
+    const cleanRef = sanitizeText(referenceNumber).toUpperCase();
+    const cleanPin = sanitizeText(pin);
+
+    // Rate Limiting Security Check against brute-force PIN guessing
+    const rateLimit = checkRateLimit(`pin_${cleanRef}`);
+    if (!rateLimit.allowed) {
+      throw new Error(`Too many failed PIN attempts. Access locked for ${rateLimit.retryAfterSeconds} seconds.`);
+    }
 
     const allBookings = await this.getBookings();
     const found = allBookings.find(
       (b) =>
-        b.referenceNumber.toUpperCase() === cleanRef &&
-        b.galleryPin === cleanPin
+        ((b.referenceNumber && b.referenceNumber.toUpperCase() === cleanRef) ||
+         (b.id && b.id.toUpperCase() === cleanRef)) &&
+        (b.galleryPin === cleanPin || (b.galleryPin && b.galleryPin.substring(0, 6) === cleanPin))
     );
 
-    return found || null;
+    if (!found) {
+      recordFailedAttempt(`pin_${cleanRef}`);
+      return null;
+    }
+
+    resetRateLimit(`pin_${cleanRef}`);
+    return found;
+  },
+
+  // --- AUDIT LOGS CRUD ---
+  async getAuditLogs(): Promise<AuditLog[]> {
+    if (isSupabaseConfigured && supabase && !isAuditLogsDisabled) {
+      try {
+        const { data, error } = await supabase
+          .from('audit_logs')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (error) {
+          isAuditLogsDisabled = true;
+        } else if (data) {
+          return data.map((row: any) => ({
+            id: String(row.id),
+            actorEmail: row.actor_email || 'system',
+            action: row.action || 'ACTION',
+            targetTable: row.target_table || 'unknown',
+            targetId: row.target_id || '',
+            details: row.details || {},
+            createdAt: row.created_at || new Date().toISOString(),
+          }));
+        }
+      } catch (e) {
+        isAuditLogsDisabled = true;
+      }
+    }
+    return getStoredData<AuditLog[]>('abis_photo_audit_logs', []);
+  },
+
+  async createAuditLog(action: string, targetTable: string, targetId: string = '', details: Record<string, any> = {}): Promise<void> {
+    const activeAdminEmail = typeof window !== 'undefined' ? localStorage.getItem('abis_admin_session_email') || 'admin@abisproduction.com' : 'system';
+    const logItem: AuditLog = {
+      id: `audit-${Date.now()}`,
+      actorEmail: activeAdminEmail,
+      action,
+      targetTable,
+      targetId,
+      details,
+      createdAt: new Date().toISOString(),
+    };
+    const current = await getStoredData<AuditLog[]>('abis_photo_audit_logs', []);
+    await setStoredData('abis_photo_audit_logs', [logItem, ...current]);
+
+    if (isSupabaseConfigured && supabase && !isAuditLogsDisabled) {
+      try {
+        await supabase.from('audit_logs').insert([{
+          actor_email: activeAdminEmail,
+          action,
+          target_table: targetTable,
+          target_id: targetId,
+          details,
+        }]);
+      } catch (e) {
+        isAuditLogsDisabled = true;
+      }
+    }
   },
 
   async updateBookingStatus(
@@ -790,19 +1005,53 @@ export const bookingStore = {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        await supabase
+        let q = supabase
           .from('bookings')
           .update({
             payment_status: paymentStatus,
             booking_status: bookingStatus,
-          })
-          .or(`id.eq.${target.id},reference_number.eq.${target.referenceNumber}`);
+          });
+        q = applyBookingFilter(q, target.id, target.referenceNumber);
+        await q;
       } catch (e) {
         console.warn('Supabase status update fallback', e);
       }
     }
 
     return target;
+  },
+
+  async deleteBooking(bookingId: string): Promise<boolean> {
+    const cleanId = (bookingId || '').trim().toLowerCase();
+    if (!cleanId) return false;
+
+    // 1. Record deleted ID in tracking list
+    const deletedIds = await getStoredData<string[]>('abis_deleted_booking_ids', []);
+    if (!deletedIds.includes(cleanId)) {
+      await setStoredData('abis_deleted_booking_ids', [...deletedIds, cleanId]);
+    }
+
+    // 2. Remove from local IndexedDB storage
+    const currentBookings = await getStoredData<Booking[]>(STORAGE_KEYS.BOOKINGS, INITIAL_BOOKINGS);
+    const updatedBookings = currentBookings.filter(
+      (b) =>
+        (b.id || '').trim().toLowerCase() !== cleanId &&
+        (b.referenceNumber || '').trim().toLowerCase() !== cleanId
+    );
+    await setStoredData(STORAGE_KEYS.BOOKINGS, updatedBookings);
+
+    // 3. Delete from Supabase Database
+    if (isSupabaseConfigured && supabase) {
+      try {
+        let q = supabase.from('bookings').delete();
+        q = applyBookingFilter(q, bookingId);
+        await q;
+      } catch (e) {
+        console.warn('Supabase deleteBooking exception:', e);
+      }
+    }
+
+    return true;
   },
 
   async cancelBooking(bookingId: string, customerEmail: string): Promise<boolean> {
@@ -841,18 +1090,23 @@ export const bookingStore = {
 
   async updateGalleryPhotos(bookingId: string, photos: ClientGalleryPhoto[]): Promise<boolean> {
     const currentBookings = await getStoredData<Booking[]>(STORAGE_KEYS.BOOKINGS, INITIAL_BOOKINGS);
-    const index = currentBookings.findIndex((b) => b.id === bookingId || b.referenceNumber === bookingId);
-    if (index === -1) return false;
-
-    currentBookings[index].galleryPhotos = photos;
-    await setStoredData(STORAGE_KEYS.BOOKINGS, currentBookings);
+    const cleanId = (bookingId || '').trim().toLowerCase();
+    const index = currentBookings.findIndex((b) =>
+      (b.id && b.id.trim().toLowerCase() === cleanId) ||
+      (b.referenceNumber && b.referenceNumber.trim().toLowerCase() === cleanId)
+    );
+    if (index !== -1) {
+      currentBookings[index].galleryPhotos = photos;
+      await setStoredData(STORAGE_KEYS.BOOKINGS, currentBookings);
+    }
 
     if (isSupabaseConfigured && supabase) {
       try {
-        await supabase
+        let q = supabase
           .from('bookings')
-          .update({ gallery_photos: photos })
-          .or(`id.eq.${bookingId},reference_number.eq.${bookingId}`);
+          .update({ gallery_photos: photos });
+        q = applyBookingFilter(q, bookingId);
+        await q;
       } catch (e) {
         // Silently handled
       }
@@ -862,53 +1116,139 @@ export const bookingStore = {
 
   async uploadOrderShotPhotos(bookingId: string, photos: ClientGalleryPhoto[]): Promise<Booking | null> {
     const currentBookings = await getStoredData<Booking[]>(STORAGE_KEYS.BOOKINGS, INITIAL_BOOKINGS);
-    const index = currentBookings.findIndex((b) => b.id === bookingId || b.referenceNumber === bookingId);
-    if (index === -1) return null;
+    const cleanId = (bookingId || '').trim().toLowerCase();
+    let index = currentBookings.findIndex((b) =>
+      (b.id && b.id.trim().toLowerCase() === cleanId) ||
+      (b.referenceNumber && b.referenceNumber.trim().toLowerCase() === cleanId)
+    );
 
-    currentBookings[index].galleryPhotos = photos;
-    currentBookings[index].bookingStatus = 'Photos Uploaded';
-    await setStoredData(STORAGE_KEYS.BOOKINGS, currentBookings);
+    let updatedBooking: Booking;
+    if (index !== -1) {
+      currentBookings[index].galleryPhotos = photos;
+      currentBookings[index].bookingStatus = 'Photos Uploaded';
+      updatedBooking = currentBookings[index];
+      await setStoredData(STORAGE_KEYS.BOOKINGS, currentBookings);
+    } else {
+      const matchInitial = INITIAL_BOOKINGS.find((b) =>
+        (b.id && b.id.trim().toLowerCase() === cleanId) ||
+        (b.referenceNumber && b.referenceNumber.trim().toLowerCase() === cleanId)
+      );
+      if (matchInitial) {
+        updatedBooking = { ...matchInitial, galleryPhotos: photos, bookingStatus: 'Photos Uploaded' };
+      } else {
+        updatedBooking = {
+          id: bookingId,
+          referenceNumber: bookingId.startsWith('PS-') ? bookingId : `PS-${new Date().getFullYear()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
+          serviceId: 'serg',
+          serviceName: 'Photography Session',
+          packageName: 'Standard Package',
+          bookingDate: new Date().toISOString().split('T')[0],
+          bookingTime: '10:00 AM',
+          totalPrice: 0,
+          customerName: 'Client',
+          customerPhone: '',
+          customerEmail: '',
+          eventType: 'Studio Session',
+          eventAddress: 'Studio',
+          paymentMethod: 'Telebirr',
+          amountPaid: 0,
+          paymentStatus: 'Verified',
+          bookingStatus: 'Photos Uploaded',
+          galleryPin: generateGalleryPin(),
+          galleryPhotos: photos,
+          createdAt: new Date().toISOString(),
+        };
+      }
+      await setStoredData(STORAGE_KEYS.BOOKINGS, [updatedBooking, ...currentBookings]);
+    }
 
     if (isSupabaseConfigured && supabase) {
       try {
-        await supabase
+        let q = supabase
           .from('bookings')
           .update({
             gallery_photos: photos,
             booking_status: 'Photos Uploaded',
-          })
-          .or(`id.eq.${bookingId},reference_number.eq.${bookingId}`);
+          });
+        q = applyBookingFilter(q, bookingId);
+        await q;
       } catch (e) {
         // Silently handled
       }
     }
-    return currentBookings[index];
+    return updatedBooking;
   },
 
   async submitCustomerPhotoSelection(bookingId: string, photos: ClientGalleryPhoto[]): Promise<Booking | null> {
     const currentBookings = await getStoredData<Booking[]>(STORAGE_KEYS.BOOKINGS, INITIAL_BOOKINGS);
-    const index = currentBookings.findIndex((b) => b.id === bookingId || b.referenceNumber === bookingId);
-    if (index === -1) return null;
+    const cleanId = (bookingId || '').trim().toLowerCase();
+    let index = currentBookings.findIndex((b) =>
+      (b.id && b.id.trim().toLowerCase() === cleanId) ||
+      (b.referenceNumber && b.referenceNumber.trim().toLowerCase() === cleanId)
+    );
 
-    currentBookings[index].galleryPhotos = photos;
-    currentBookings[index].bookingStatus = 'Selection Submitted';
-    currentBookings[index].selectionSubmittedAt = new Date().toISOString();
-    await setStoredData(STORAGE_KEYS.BOOKINGS, currentBookings);
+    let updatedBooking: Booking;
+    if (index !== -1) {
+      currentBookings[index].galleryPhotos = photos;
+      currentBookings[index].bookingStatus = 'Selection Submitted';
+      currentBookings[index].selectionSubmittedAt = new Date().toISOString();
+      updatedBooking = currentBookings[index];
+      await setStoredData(STORAGE_KEYS.BOOKINGS, currentBookings);
+    } else {
+      const matchInitial = INITIAL_BOOKINGS.find((b) =>
+        (b.id && b.id.trim().toLowerCase() === cleanId) ||
+        (b.referenceNumber && b.referenceNumber.trim().toLowerCase() === cleanId)
+      );
+      if (matchInitial) {
+        updatedBooking = {
+          ...matchInitial,
+          galleryPhotos: photos,
+          bookingStatus: 'Selection Submitted',
+          selectionSubmittedAt: new Date().toISOString(),
+        };
+      } else {
+        updatedBooking = {
+          id: bookingId,
+          referenceNumber: bookingId.startsWith('PS-') ? bookingId : `PS-${new Date().getFullYear()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
+          serviceId: 'serg',
+          serviceName: 'Photography Session',
+          packageName: 'Standard Package',
+          bookingDate: new Date().toISOString().split('T')[0],
+          bookingTime: '10:00 AM',
+          totalPrice: 0,
+          customerName: 'Client',
+          customerPhone: '',
+          customerEmail: '',
+          eventType: 'Studio Session',
+          eventAddress: 'Studio',
+          paymentMethod: 'Telebirr',
+          amountPaid: 0,
+          paymentStatus: 'Verified',
+          bookingStatus: 'Selection Submitted',
+          selectionSubmittedAt: new Date().toISOString(),
+          galleryPin: generateGalleryPin(),
+          galleryPhotos: photos,
+          createdAt: new Date().toISOString(),
+        };
+      }
+      await setStoredData(STORAGE_KEYS.BOOKINGS, [updatedBooking, ...currentBookings]);
+    }
 
     if (isSupabaseConfigured && supabase) {
       try {
-        await supabase
+        let q = supabase
           .from('bookings')
           .update({
             gallery_photos: photos,
             booking_status: 'Selection Submitted',
-          })
-          .or(`id.eq.${bookingId},reference_number.eq.${bookingId}`);
+          });
+        q = applyBookingFilter(q, bookingId);
+        await q;
       } catch (e) {
         // Silently handled
       }
     }
-    return currentBookings[index];
+    return updatedBooking;
   },
 
   async getBlockedDates(): Promise<BlockedDate[]> {

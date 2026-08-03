@@ -1,72 +1,16 @@
 'use client';
 
 import React, { useEffect } from 'react';
-import Image from 'next/image';
 import { X, ChevronLeft, ChevronRight, Video, Quote, Calendar, User } from 'lucide-react';
 import { PortfolioItem } from '@/types';
+import OptimizedImage from './OptimizedImage';
+import VideoPlayerWithLoader from './VideoPlayerWithLoader';
 
 interface LightboxModalProps {
   item: PortfolioItem | null;
   onClose: () => void;
   onPrev: () => void;
   onNext: () => void;
-}
-
-function renderBtsVideo(url: string) {
-  if (!url) return null;
-
-  const cleanUrl = url.trim();
-
-  // YouTube Embed Handling
-  if (cleanUrl.includes('youtube.com') || cleanUrl.includes('youtu.be')) {
-    let embedUrl = cleanUrl;
-    if (cleanUrl.includes('youtube.com/watch?v=')) {
-      const videoId = cleanUrl.split('v=')[1]?.split('&')[0];
-      embedUrl = `https://www.youtube.com/embed/${videoId}?autoplay=1`;
-    } else if (cleanUrl.includes('youtu.be/')) {
-      const videoId = cleanUrl.split('youtu.be/')[1]?.split('?')[0];
-      embedUrl = `https://www.youtube.com/embed/${videoId}?autoplay=1`;
-    }
-    return (
-      <iframe
-        src={embedUrl}
-        title="Behind the scenes video"
-        className="w-full h-full border-0 rounded-xl"
-        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-        allowFullScreen
-      />
-    );
-  }
-
-  // Vimeo Embed Handling
-  if (cleanUrl.includes('vimeo.com')) {
-    const videoId = cleanUrl.split('vimeo.com/')[1]?.split('?')[0];
-    const embedUrl = `https://player.vimeo.com/video/${videoId}`;
-    return (
-      <iframe
-        src={embedUrl}
-        title="Vimeo video"
-        className="w-full h-full border-0 rounded-xl"
-        allow="autoplay; fullscreen; picture-in-picture"
-        allowFullScreen
-      />
-    );
-  }
-
-  // Direct Video File (DataURL, Supabase Storage, Blob, MP4, WEBM, MOV)
-  return (
-    <video
-      src={cleanUrl}
-      controls
-      autoPlay
-      playsInline
-      preload="auto"
-      className="w-full h-full object-contain bg-black rounded-xl"
-    >
-      <source src={cleanUrl} />
-      Your browser does not support playing this video format.
-    </video>
-  );
 }
 
 export default function LightboxModal({ item, onClose, onPrev, onNext }: LightboxModalProps) {
@@ -117,7 +61,7 @@ export default function LightboxModal({ item, onClose, onPrev, onNext }: Lightbo
       <div className="relative z-10 w-full max-w-5xl max-h-[90vh] bg-zinc-950 border border-gold-500/20 rounded-2xl overflow-hidden shadow-2xl flex flex-col lg:flex-row my-auto">
         {/* Main Photo Area */}
         <div className="relative flex-1 min-h-[350px] lg:min-h-[550px] bg-black flex items-center justify-center">
-          <Image
+          <OptimizedImage
             src={item.image}
             alt={item.title}
             fill
@@ -126,7 +70,7 @@ export default function LightboxModal({ item, onClose, onPrev, onNext }: Lightbo
             priority
           />
 
-          <span className="absolute top-4 left-4 px-3 py-1 bg-zinc-900/80 border border-gold-500/30 text-gold-400 text-xs font-semibold rounded-full backdrop-blur-md">
+          <span className="absolute top-4 left-4 z-20 px-3 py-1 bg-zinc-900/80 border border-gold-500/30 text-gold-400 text-xs font-semibold rounded-full backdrop-blur-md">
             {item.category}
           </span>
         </div>
@@ -167,12 +111,14 @@ export default function LightboxModal({ item, onClose, onPrev, onNext }: Lightbo
               </div>
             )}
 
-            {/* Behind-The-Scenes Video Player */}
+            {/* Behind-The-Scenes Video Player with Loader */}
             {item.btsVideoUrl && (
               <div className="pt-2">
-                <div className="aspect-video w-full rounded-xl overflow-hidden bg-black border border-zinc-800">
-                  {renderBtsVideo(item.btsVideoUrl)}
-                </div>
+                <VideoPlayerWithLoader
+                  src={item.btsVideoUrl}
+                  title={item.title}
+                  className="aspect-video w-full"
+                />
               </div>
             )}
           </div>

@@ -48,6 +48,11 @@ export const metadata: Metadata = {
     locale: 'en_US',
     type: 'website',
   },
+  icons: {
+    icon: '/icon.svg',
+    shortcut: '/icon.svg',
+    apple: '/icon.svg',
+  },
   twitter: {
     card: 'summary_large_image',
     title: 'Abis Production | Luxury Photography & Cinema Studio',
@@ -98,6 +103,68 @@ export default function RootLayout({
         />
       </head>
       <body className="bg-dark-bg text-zinc-100 min-h-screen flex flex-col antialiased selection:bg-gold-500 selection:text-dark-bg">
+        {/* Instant pre-hydration global loading screen */}
+        <div
+          id="global-preloader"
+          suppressHydrationWarning
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            backgroundColor: '#08080a',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '16px',
+            transition: 'opacity 0.5s ease, visibility 0.5s ease',
+          }}
+        >
+          <div
+            style={{
+              width: '48px',
+              height: '48px',
+              borderRadius: '50%',
+              border: '3px solid rgba(212, 175, 55, 0.2)',
+              borderTopColor: '#D4AF37',
+              animation: 'spin 0.8s linear infinite',
+            }}
+          />
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+          <span
+            style={{
+              color: '#D4AF37',
+              fontSize: '12px',
+              fontWeight: 600,
+              letterSpacing: '0.15em',
+              textTransform: 'uppercase',
+              fontFamily: 'sans-serif',
+            }}
+          >
+            Abis Production Studio
+          </span>
+        </div>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              window.addEventListener('load', function() {
+                var p = document.getElementById('global-preloader');
+                if (p) {
+                  p.style.opacity = '0';
+                  setTimeout(function() { p.style.display = 'none'; }, 500);
+                }
+              });
+              setTimeout(function() {
+                var p = document.getElementById('global-preloader');
+                if (p && p.style.display !== 'none') {
+                  p.style.opacity = '0';
+                  setTimeout(function() { p.style.display = 'none'; }, 500);
+                }
+              }, 1200);
+            `,
+          }}
+        />
+
         <Navbar />
         <main className="flex-grow pt-24">{children}</main>
         <Footer />

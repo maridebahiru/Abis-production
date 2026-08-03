@@ -1,8 +1,7 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
 import { 
   Camera, 
   Calendar, 
@@ -18,17 +17,23 @@ import {
 } from 'lucide-react';
 import { bookingStore, INITIAL_WEBSITE_SETTINGS } from '@/lib/bookingStore';
 import { getServiceCoverImage } from '@/lib/mockData';
-import LightboxModal from '@/components/LightboxModal';
+import OptimizedImage from '@/components/OptimizedImage';
+import LoadingSpinner from '@/components/LoadingSpinner';
 import { PortfolioItem, Service, WebsiteSettings } from '@/types';
+
+// Code-split heavy LightboxModal component
+const LightboxModal = lazy(() => import('@/components/LightboxModal'));
 
 export default function HomePage() {
   const [selectedLightboxIndex, setSelectedLightboxIndex] = useState<number | null>(null);
   const [siteSettings, setSiteSettings] = useState<WebsiteSettings>(INITIAL_WEBSITE_SETTINGS);
   const [services, setServices] = useState<Service[]>([]);
   const [portfolioItems, setPortfolioItems] = useState<PortfolioItem[]>([]);
+  const [isLoadingData, setIsLoadingData] = useState<boolean>(true);
 
   useEffect(() => {
     async function loadLiveData() {
+      setIsLoadingData(true);
       const settings = await bookingStore.getWebsiteSettings();
       const sList = await bookingStore.getServices();
       const pList = await bookingStore.getPortfolioItems();
@@ -36,6 +41,7 @@ export default function HomePage() {
       setSiteSettings(settings);
       setServices(sList.filter((s) => s.isEnabled !== false));
       setPortfolioItems(pList);
+      setIsLoadingData(false);
     }
     loadLiveData();
   }, []);
@@ -51,7 +57,7 @@ export default function HomePage() {
       <section className="relative min-h-[88vh] flex items-center justify-center -mt-24 pt-32 pb-16 px-4">
         {/* Background Image Overlay */}
         <div className="absolute inset-0 z-0 overflow-hidden">
-          <Image
+          <OptimizedImage
             src={heroImgSrc}
             alt="Abis Production background"
             fill
@@ -170,47 +176,55 @@ export default function HomePage() {
 
         {/* Dynamic Services Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6">
-          {services.map((service) => (
-            <div
-              key={service.id}
-              className="glass-card glass-card-hover rounded-2xl overflow-hidden flex flex-col justify-between group"
-            >
-              <div className="relative h-56 w-full overflow-hidden">
-                <Image
-                  src={getServiceCoverImage(service)}
-                  alt={service.title}
-                  fill
-                  sizes="(max-width: 768px) 100vw, (max-width: 1200px) 33vw, 16vw"
-                  className="object-cover group-hover:scale-110 transition-transform duration-700"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-dark-card via-transparent to-transparent opacity-80" />
-
-                <span className="absolute top-3 right-3 px-3 py-1 bg-dark-bg/80 border border-gold-500/30 text-gold-300 text-[11px] font-semibold rounded-full backdrop-blur-md">
-                  {service.estimatedDuration}
-                </span>
-              </div>
-
-              <div className="p-5 space-y-3 flex-grow flex flex-col justify-between">
-                <div className="space-y-2">
-                  <h3 className="font-serif text-2xl font-bold text-zinc-100 group-hover:text-gold-300 transition-colors">
-                    {service.title}
-                  </h3>
-                  <p className="text-xs text-zinc-400 leading-relaxed line-clamp-3">
-                    {service.description}
-                  </p>
+          {isLoadingData
+            ? Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="glass-card rounded-2xl h-80 p-4 space-y-4 animate-pulse">
+                  <div className="h-40 rounded-xl bg-gradient-to-r from-zinc-900 via-zinc-800 to-zinc-900 bg-[length:200%_100%] animate-shimmer" />
+                  <div className="h-4 w-3/4 rounded bg-zinc-800" />
+                  <div className="h-3 w-1/2 rounded bg-zinc-800" />
                 </div>
+              ))
+            : services.map((service) => (
+                <div
+                  key={service.id}
+                  className="glass-card glass-card-hover rounded-2xl overflow-hidden flex flex-col justify-between group"
+                >
+                  <div className="relative h-56 w-full overflow-hidden">
+                    <OptimizedImage
+                      src={getServiceCoverImage(service)}
+                      alt={service.title}
+                      fill
+                      sizes="(max-width: 768px) 100vw, (max-width: 1200px) 33vw, 16vw"
+                      className="object-cover group-hover:scale-110 transition-transform duration-700"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-dark-card via-transparent to-transparent opacity-80" />
 
-                <div className="pt-4 border-t border-zinc-800/80 flex items-center justify-end">
-                  <Link
-                    href={`/booking?service=${service.id}`}
-                    className="gold-btn px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 w-full justify-center"
-                  >
-                    <span>Book Now</span>
-                  </Link>
+                    <span className="absolute top-3 right-3 px-3 py-1 bg-dark-bg/80 border border-gold-500/30 text-gold-300 text-[11px] font-semibold rounded-full backdrop-blur-md">
+                      {service.estimatedDuration}
+                    </span>
+                  </div>
+
+                  <div className="p-5 space-y-3 flex-grow flex flex-col justify-between">
+                    <div className="space-y-2">
+                      <h3 className="font-serif text-2xl font-bold text-zinc-100 group-hover:text-gold-300 transition-colors">
+                        {service.title}
+                      </h3>
+                      <p className="text-xs text-zinc-400 leading-relaxed line-clamp-3">
+                        {service.description}
+                      </p>
+                    </div>
+
+                    <div className="pt-4 border-t border-zinc-800/80 flex items-center justify-end">
+                      <Link
+                        href={`/booking?service=${service.id}`}
+                        className="gold-btn px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 w-full justify-center"
+                      >
+                        <span>Book Now</span>
+                      </Link>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-          ))}
+              ))}
         </div>
       </section>
 
@@ -229,20 +243,24 @@ export default function HomePage() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {portfolioItems.slice(0, 6).map((item, index) => (
-            <div
-              key={item.id}
-              onClick={() => setSelectedLightboxIndex(index)}
-              className="relative h-80 rounded-2xl overflow-hidden cursor-pointer group border border-zinc-800 hover:border-gold-500/40 transition-all shadow-xl"
-            >
-              <Image
-                src={item.image}
-                alt={item.title}
-                fill
-                sizes="(max-width: 768px) 100vw, 33vw"
-                className="object-cover group-hover:scale-105 transition-transform duration-700"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity" />
+          {isLoadingData
+            ? Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="h-80 rounded-2xl bg-gradient-to-r from-zinc-900 via-zinc-800 to-zinc-900 bg-[length:200%_100%] animate-shimmer border border-zinc-800" />
+              ))
+            : portfolioItems.slice(0, 6).map((item, index) => (
+                <div
+                  key={item.id}
+                  onClick={() => setSelectedLightboxIndex(index)}
+                  className="relative h-80 rounded-2xl overflow-hidden cursor-pointer group border border-zinc-800 hover:border-gold-500/40 transition-all shadow-xl"
+                >
+                  <OptimizedImage
+                    src={item.image}
+                    alt={item.title}
+                    fill
+                    sizes="(max-width: 768px) 100vw, 33vw"
+                    className="object-cover group-hover:scale-105 transition-transform duration-700"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity" />
 
               <div className="absolute bottom-0 inset-x-0 p-6 space-y-2">
                 <span className="px-2.5 py-1 bg-gold-500/20 border border-gold-500/40 text-gold-300 text-[10px] font-semibold uppercase tracking-wider rounded-md">
@@ -305,20 +323,24 @@ export default function HomePage() {
       </section>
 
       {/* Lightbox Modal */}
-      <LightboxModal
-        item={activeItem}
-        onClose={() => setSelectedLightboxIndex(null)}
-        onPrev={() =>
-          setSelectedLightboxIndex((prev) =>
-            prev !== null ? (prev === 0 ? portfolioItems.length - 1 : prev - 1) : null
-          )
-        }
-        onNext={() =>
-          setSelectedLightboxIndex((prev) =>
-            prev !== null ? (prev === portfolioItems.length - 1 ? 0 : prev + 1) : null
-          )
-        }
-      />
+      <Suspense fallback={null}>
+        {selectedLightboxIndex !== null && (
+          <LightboxModal
+            item={activeItem}
+            onClose={() => setSelectedLightboxIndex(null)}
+            onPrev={() =>
+              setSelectedLightboxIndex((prev) =>
+                prev !== null ? (prev === 0 ? portfolioItems.length - 1 : prev - 1) : null
+              )
+            }
+            onNext={() =>
+              setSelectedLightboxIndex((prev) =>
+                prev !== null ? (prev === portfolioItems.length - 1 ? 0 : prev + 1) : null
+              )
+            }
+          />
+        )}
+      </Suspense>
     </div>
   );
 }

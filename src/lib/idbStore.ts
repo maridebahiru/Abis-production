@@ -90,7 +90,31 @@ export async function getIDBData<T>(key: string, defaultValue: T): Promise<T> {
   });
 }
 
+const SENSITIVE_KEY_PATTERNS = [
+  'booking',
+  'admin_user',
+  'admin_auth',
+  'customer',
+  'pin',
+  'credential',
+];
+
+export function isAllowedOfflineKey(key: string): boolean {
+  const lowerKey = key.toLowerCase();
+  for (const pattern of SENSITIVE_KEY_PATTERNS) {
+    if (lowerKey.includes(pattern)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export async function setIDBData<T>(key: string, data: T): Promise<void> {
+  if (!isAllowedOfflineKey(key)) {
+    // Security Guard: Prevent caching sensitive customer PII, PINs, or admin credentials offline
+    return;
+  }
+
   const db = await getIDB();
   if (!db) return;
 

@@ -157,3 +157,13 @@ export interface AdminUser {
   role: AdminUserRole;
   createdAt?: string;
 }
+
+export interface AuditLog {
+  id: string;
+  actorEmail: string;
+  action: string;
+  targetTable: string;
+  targetId?: string;
+  details?: Record<string, any>;
+  createdAt: string;
+}
